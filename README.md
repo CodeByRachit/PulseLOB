@@ -1,10 +1,10 @@
 # PulseLOB
 
-**Real-time cross-venue order-flow toxicity detection with an online, non-stationary, marked multivariate Hawkes process.** The engine is a header-only C++20 core with zero allocations on the hot path, verified against definition-level references to 1e-10. It will get Python bindings next and then be validated inside an Avellaneda–Stoikov market-making simulator with realistic latency and queue modeling.
+**Real-time cross-venue order-flow toxicity detection with an online, non-stationary, marked multivariate Hawkes process.** The engine is a header-only C++20 core with zero allocations on the hot path, verified against definition-level references to 1e-10. It has zero-copy Python bindings and a data layer for synthetic and Binance data. Next it will be validated inside an Avellaneda–Stoikov market-making simulator with realistic latency and queue modeling.
 
 [![CI](https://github.com/CodeByRachit/PulseLOB/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeByRachit/PulseLOB/actions/workflows/ci.yml)
 
-> **Status: Phase 3 (C++20 engine, verification, benchmarks), awaiting review.** The full per-event algorithm of the spec runs in C++20: exact kernel recursions, the online least-squares estimator with regime detection, the sub-criticality guardrail, toxicity scores and the quoting law. It runs inline or with the estimator on a second core. Phases 1 and 2 are released as `v0.1.0` and `v0.2.0`. Each phase ships as a tagged version (see [Roadmap](#roadmap)).
+> **Status: Phase 4 (Python bindings and data infrastructure), awaiting review.** The C++20 engine (Phase 3, `v0.3.0`) is available from Python with zero-copy batch processing. Synthetic data with ground truth, a live Binance recorder and a historical archive loader all produce the same `.plev` event files. Each phase ships as a tagged version (see [Roadmap](#roadmap)).
 
 ## The problem
 
@@ -60,6 +60,33 @@ The full table of math_spec V1–V11 results is in [Section 10 of the spec](docs
 
 Tick-to-quote is the time from a trade arriving to a complete signal with quotes. macOS cannot isolate cores, so the tails are indicative. Inline mode is the default because it is bit-for-bit reproducible. Split mode is recommended for live quoting when the latency budget is below about 1 µs.
 
+## Python
+
+```bash
+pip install .                       # or ".[record]" for the live recorder
+```
+
+```python
+import pulselob as pl
+from pulselob import synth
+
+ds = synth.generate("lead_lag", seed=1)                # ground-truth synthetic stream
+eng = pl.Engine(pl.EngineConfig.default())             # estimator="cholesky", mode="inline"
+res = eng.run(ds.events, state_every=1000)             # zero-copy, GIL released
+res.signals["tau_buy"], res.signals["ask_px_e8"], res.states["theta_hat"]
+eng.run("data/btcusdt.plev")                           # a memory-mapped .plev file works the same way
+```
+
+`Engine.run` processes **1.82 M events/s**, the same speed as the native C++ driver on the same file (1.77 M events/s; [docs/benchmarks.md](docs/benchmarks.md) Section 8). Its output is byte-identical to the native driver's, which a test checks.
+
+Data commands ([docs/data.md](docs/data.md) has the formats, endpoints and known gaps):
+
+```bash
+pulselob-synth flash_crash --out data/crash.plev                       # synthetic, with ground truth
+pulselob-record --symbol BTCUSDT --out data/live.plev --duration 3600  # live Binance Spot + USD-M
+pulselob-archive --day 2024-03-01 --out data/btc-2024-03-01.plev       # data.binance.vision archive
+```
+
 ## Building
 
 You need CMake 3.25 or newer, a C++20 compiler (GCC 13+, Clang 16+ or AppleClang 15+), and Python 3.9 or newer for the package.
@@ -82,22 +109,23 @@ python -m pytest
 |---|---|---|---|
 | 1 | Mathematical specification and numerical validation | `v0.1.0` | released |
 | 2 | Repository architecture, CMake, memory layout, data schemas | `v0.2.0` | released |
-| 3 | C++20 engine, exactness and stress tests, micro-benchmarks | `v0.3.0` | in review |
-| 4 | pybind11 bindings, synthetic generator, Binance data loader | `v0.4.0` | planned |
+| 3 | C++20 engine, exactness and stress tests, micro-benchmarks | `v0.3.0` | released |
+| 4 | pybind11 bindings, synthetic generator, Binance recorder and archive loader | `v0.4.0` | in review |
 | 5 | Event-driven market-making simulator and comparative backtest | `v0.5.0` | planned |
 | 6 | Figures, whitepaper, publication polish | `v1.0.0` | planned |
 
-Every published number comes from a real run; the Phase 3 raw outputs are in [`bench/results/`](bench/results/).
+Every published number comes from a real run; the raw outputs are in [`bench/results/`](bench/results/).
 
 ## Repository layout
 
 ```text
 docs/math_spec.md                      specification (derivations, proofs, verification results)
 docs/architecture.md                   engineering specification (layout, memory, concurrency, schemas)
-docs/benchmarks.md                     Phase 3 measurements and the decisions they support
-include/pulselob/                      header-only C++20 engine: core/, feed/, hawkes/, control/, engine/
-bindings/                              pybind11 module pulselob._core
-python/pulselob/                       Python package (schema, .plev event files)
+docs/benchmarks.md                     measurements and the decisions they support
+docs/data.md                           data sources: synthetic, live recorder, archive; formats and gaps
+include/pulselob/                      header-only C++20 engine: core/, feed/, hawkes/, control/, engine/, synth/
+bindings/, tools/                      pybind11 module pulselob._core; native replay driver pulselob-replay
+python/pulselob/                       Python package: Engine, config, .plev, synth, data (recorder, archive)
 tests/cpp/, tests/python/              GoogleTest (incl. tests/cpp/alloc zero-allocation proof) and pytest
 tests/support/, tests/fixtures/        simulator and quadrature references; Python cross-check fixture
 bench/                                 Google Benchmark suite, latency report, raw results
@@ -118,4 +146,4 @@ Pushing a tag `vX.Y.Z` that matches `VERSION` triggers the release workflow, whi
 
 ## License
 
-Not yet chosen.
+[MIT](LICENSE) © 2026 Rachit Yadav.

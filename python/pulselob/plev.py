@@ -79,13 +79,94 @@ def read_header(path: str | Path) -> dict[str, int]:
     return {"schema_version": schema, "n_records": n, "created_unix_ns": created}
 
 
-def open_plev(path: str | Path) -> tuple[np.memmap, dict[str, Any]]:
-    """Memory-map a .plev file read-only. Returns (events, metadata); metadata includes the sidecar."""
+def open_plev(path: str | Path) -> tuple[np.ndarray, dict[str, Any]]:
+    """Memory-map a .plev file read-only. Returns (events, metadata); metadata includes the sidecar.
+
+    An empty file yields an empty in-memory array (a zero-length memory map is not allowed)."""
     header = read_header(path)
-    events = np.memmap(path, dtype=MARKET_EVENT_DTYPE, mode="r", offset=HEADER_SIZE,
-                       shape=(header["n_records"],))
+    events: np.ndarray
+    if header["n_records"] == 0:
+        events = np.empty(0, dtype=MARKET_EVENT_DTYPE)
+    else:
+        events = np.memmap(path, dtype=MARKET_EVENT_DTYPE, mode="r", offset=HEADER_SIZE,
+                           shape=(header["n_records"],))
     meta: dict[str, Any] = dict(header)
     side = sidecar_path(path)
     if side.exists():
         meta["sidecar"] = json.loads(side.read_text())
     return events, meta
+
+
+class PlevWriter:
+    """Streaming .plev writer for recorders: records are appended and the header's record count is
+    rewritten on every flush, so the file is a valid .plev after each flush. A crash between
+    flushes leaves at most a torn tail, which `recover_plev` removes."""
+
+    def __init__(self, path: str | Path, flush_records: int = 4096):
+        self.path = Path(path)
+        self._f = open(self.path, "wb")
+        self._n = 0
+        self._buf: list[np.ndarray] = []
+        self._buffered = 0
+        self._flush_records = flush_records
+        self._created = time.time_ns()
+        self._write_header()
+
+    def _write_header(self) -> None:
+        self._f.seek(0)
+        self._f.write(_HEADER.pack(MAGIC, SCHEMA_VERSION, MARKET_EVENT_DTYPE.itemsize, HEADER_SIZE, 0, self._n,
+                                   self._created, bytes(32)))
+        self._f.seek(0, 2)
+
+    @property
+    def n_records(self) -> int:
+        return self._n + self._buffered
+
+    def append(self, events: np.ndarray) -> None:
+        if events.dtype != MARKET_EVENT_DTYPE:
+            raise TypeError("events must have dtype pulselob.MARKET_EVENT_DTYPE")
+        if events.size == 0:
+            return
+        self._buf.append(np.ascontiguousarray(events.reshape(-1)))
+        self._buffered += int(events.size)
+        if self._buffered >= self._flush_records:
+            self.flush()
+
+    def flush(self) -> None:
+        if self._buf:
+            self._f.write(np.concatenate(self._buf).tobytes(order="C"))
+            self._n += self._buffered
+            self._buf.clear()
+            self._buffered = 0
+        self._write_header()
+        self._f.flush()
+
+    def close(self, metadata: dict[str, Any] | None = None) -> Path:
+        self.flush()
+        self._f.close()
+        if metadata is not None:
+            sidecar_path(self.path).write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+        return self.path
+
+    def __enter__(self) -> PlevWriter:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if not self._f.closed:
+            self.close()
+
+
+def recover_plev(path: str | Path) -> int:
+    """Truncate a torn tail and set the header count to the number of whole records; returns it."""
+    path = Path(path)
+    with open(path, "r+b") as f:
+        raw = f.read(HEADER_SIZE)
+        magic, schema, record_size, header_size, r0, _n, created, r1 = _HEADER.unpack(raw)
+        if magic != MAGIC or record_size != MARKET_EVENT_DTYPE.itemsize or header_size != HEADER_SIZE:
+            raise PlevFormatError(f"{path}: not a .plev file")
+        size = path.stat().st_size
+        n = (size - HEADER_SIZE) // record_size
+        f.truncate(HEADER_SIZE + n * record_size)
+        f.seek(0)
+        f.write(_HEADER.pack(magic, schema, record_size, header_size, r0, n, created, r1))
+    return n

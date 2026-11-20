@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Document version | 0.3.0 |
-| Phase | 2 (architecture), updated in 3 (engine as built) |
-| Implements | [math_spec.md](math_spec.md), spec version 0.2.0 |
-| Status | Phase 3 engine built and verified; measurements in [benchmarks.md](benchmarks.md) |
+| Document version | 0.4.0 |
+| Phase | 2 (architecture), updated in 3 (engine as built) and 4 (bindings and data) |
+| Implements | [math_spec.md](math_spec.md), spec version 0.2.1 |
+| Status | Engine, bindings and data layer built and verified; measurements in [benchmarks.md](benchmarks.md), data sources in [data.md](data.md) |
 | Date | 2026-11-20 |
 
 This document fixes how the mathematics of the spec becomes software. Everything marked **(built)** exists and is tested on Linux (GCC 13, Clang 18, with AddressSanitizer, UBSan and ThreadSanitizer) and macOS arm64 (AppleClang). Phase 2 built the build system, the schema and layout types, the SPSC ring, the Python package skeleton and CI. Phase 3 built the model engine: the `hawkes`, `control` and `engine` components, the event mapper, the seqlock and split mode. Everything marked **(Phase n)** is specified here and implemented in that phase.
@@ -40,17 +40,19 @@ PulseLOB/
 │   ├── version.hpp.in             generated from VERSION                                   (built)
 │   ├── core/                      platform constants, time, fixed point, fixed matrices,
 │   │                              model shape, psi, linear algebra, FTZ guard, seqlock     (built)
-│   ├── feed/                      MarketEvent schema, SPSC ring, event mapper              (built)
-│   │                              stream merger                                             (Phase 4)
+│   ├── feed/                      MarketEvent schema, SPSC ring, event mapper, Binance CSV (built)
 │   ├── hawkes/                    kernel bank, estimator (2 back-ends), CUSUM, stability,
 │   │                              forecasts and toxicity, marks, model                     (built)
 │   ├── control/                   quoting law, pull triggers, kill switch, throttle        (built)
 │   ├── engine/                    configuration, decision layer, inline engine, split
 │   │                              engine, replay driver, Signal, counters                  (built)
+│   ├── synth/                     Ogata simulator, synthetic MarketEvent streams           (built)
 │   └── sim/                       market-making simulator                                  (Phase 5)
 ├── bindings/module.cpp            pybind11 module pulselob._core                           (built)
-├── python/pulselob/               Python package: schema, .plev I/O                        (built)
-│                                  config, data loaders, generators, simulator, analysis    (Phase 3–6)
+├── tools/replay.cpp               native replay driver pulselob-replay                     (built)
+├── python/pulselob/               Python package: schema, .plev I/O, config, Engine,
+│                                  synth, data (recorder, archive), bench                   (built)
+│                                  simulator, analysis                                      (Phase 5–6)
 ├── tests/cpp/                     GoogleTest unit, equivalence, stress tests; alloc proof  (built)
 ├── tests/support/                 Ogata simulator, quadrature references, test configs     (built)
 ├── tests/fixtures/                Python-reference cross-check fixture                     (built)
@@ -78,8 +80,9 @@ The prompt for this project suggested `include/hawkes_toxicity/`. The headers li
 | `hawkes` | kernel bank and state recursion, compensators, least-squares estimator (information form and Potter, ridge replenishment), CUSUM, stability projection, forecasts and toxicity, mark normalization | 2.3, 3–7 | `core` | 3 |
 | `control` | quoting law, pull and kill-switch state machines, message throttling | 8 | `core`, `hawkes` | 3 |
 | `engine` | per-event pipeline (spec Section 9), counters, snapshot/restore, replay driver | 9 | `core`, `feed`, `hawkes`, `control` | 3 |
+| `synth` | exact Ogata simulation of the model with piecewise parameters; MarketEvent streams with ground truth | 3 | `core`, `feed` | 4 |
 | `sim` | latency and queue-position simulator, fills, fees, PnL, markouts | (Phase 5 spec) | `core`, `feed`, `engine` | 5 |
-| bindings | pybind11 module | – | everything | 2 (schema), 3–5 |
+| bindings, tools | pybind11 module; native replay driver | – | everything | 2 (schema), 4 (engine, data) |
 
 `hawkes` does not know about markets: it sees channels, times and marks. `feed` turns market events into those. This keeps the model testable against the spec's definitions without any market-data plumbing.
 
@@ -164,7 +167,7 @@ Third-party code is included with `SYSTEM`, so the project's warning set and `-W
 | C++ clang-18 tsan | Ubuntu 24.04 x86-64 | Clang 18 | RelWithDebInfo, ThreadSanitizer |
 | C++ appleclang arm64 release | macOS, latest GitHub arm64 image | AppleClang | Release, `-Werror` |
 | Benchmarks compile | Ubuntu 24.04 | GCC 13 | bench preset (built, not run: CI timings are not meaningful) |
-| Python | Ubuntu (3.9, 3.12), macOS latest arm64 (3.12) | platform default | `pip install .[test]`, pytest |
+| Python | Ubuntu (3.9, 3.12), macOS latest arm64 (3.12) | platform default | `pip install .[test]` (module and `pulselob-replay`), pytest: bindings parity, generator statistics, recorder (mock and local WebSocket server; never Binance), archive loader |
 
 The CMake minimum is 3.25 (presets v6, `FetchContent ... SYSTEM`). Development was done with CMake 4.3 and AppleClang 21 on an Apple M4.
 
@@ -553,23 +556,32 @@ These are throughput figures for independent calls. They are not latency distrib
 
 ---
 
-## 10. Python package
+## 10. Python package (built)
 
 ```text
 python/pulselob/
-├── __init__.py     version, schema, validate_events            (built)
-├── schema.py       MARKET_EVENT_DTYPE, enums, import-time layout check  (built)
-├── plev.py         .plev writer, memory-mapped reader, sidecar  (built)
-├── config.py       dataclasses mirroring Config, TOML load, validation   (Phase 3)
-├── data/           Binance CSV loaders, normalizer, merge, live recorder  (Phase 4)
-├── synth/          cluster and Ogata generators with ground truth         (Phase 4)
-├── sim/            strategies and simulator orchestration                (Phase 5)
-└── analysis/       metrics, markout curves, figures                       (Phase 6)
+├── __init__.py        public API, native_replay_path()
+├── schema.py          MARKET_EVENT_DTYPE, SIGNAL_DTYPE, enums, exact decimal_to_e8, event builders;
+│                      both dtypes checked against the native layouts at import
+├── plev.py            .plev writer and memory-mapped reader, streaming PlevWriter, recover_plev
+├── config.py          EngineConfig: every parameter under the C++ codec's key names; presets for the
+│                      default and exp3 banks; to_text() for the native tool
+├── engine.py          Engine (run, step, heartbeat, set_inventory, state, counters, drain)
+├── synth/             scenarios, generate(), write() with ground truth; pulselob-synth
+├── data/recorder.py   live Binance recorder; pulselob-record
+├── data/binance_archive.py  data.binance.vision loader; pulselob-archive
+└── bench.py           python -m pulselob.bench
 ```
 
-The planned Phase 3/4 API is `pulselob.Engine(config, shape="default").run(events) -> np.ndarray[Signal]`. The input is consumed without a copy, and the output is preallocated by NumPy and filled with the GIL released. Python reads configuration files (TOML); the C++ core has no parser dependency.
+**Engine bridge.** `pulselob._core.Engine` is one type-erased class over model shape (`default`, `exp3`), estimator (`cholesky`, `potter`) and mode (`inline`, `split`).
 
----
+* **Configuration.** It arrives as `{key: [values]}`, is applied through `engine/config_io.hpp` (the same codec the native tool and the cross-check test use), and is validated. A violation raises `ValueError` with the condition.
+* **`Engine.run(events, state_every=0)`.** The input is a MarketEvent array, a memory-mapped `.plev` file or a path, and it is read in place. Output arrays are allocated before the call: one Signal per event and, if requested, the model state every k-th model step (served and unconstrained parameters, branching matrix, stationary intensities, criticality, effective sample size, CUSUM statistics). The GIL is released for the whole loop, with flush-to-zero set for the duration.
+* **`Engine.step(event)`.** The same path for one event, for live loops. In split mode it does not wait for the estimator thread; `drain()` does.
+
+**Native tool.** `pulselob-replay` (`tools/replay.cpp`) is installed in the wheel and built in every C++ configuration. It reads a `.plev` file and the text configuration, and writes the raw Signal records. The Python tests require its output to equal `Engine.run` byte for byte.
+
+**Packaging.** scikit-build-core builds the module and the tool. The `record` extra adds `websockets`. The console scripts are `pulselob-record`, `pulselob-archive` and `pulselob-synth`. The license is MIT.
 
 ## 11. Assumptions and edge cases
 
@@ -597,8 +609,8 @@ For the Phase 3 review:
 1. **The information-form estimator as the default back-end**, with Potter kept as an alternative (math_spec 5.4.1, [benchmarks.md](benchmarks.md) Section 6). This changes the spec 0.1.0 choice, on measured speed and accuracy.
 2. **Inline mode stays the default; split mode is for live quoting** below about 1 µs of tick-to-quote budget or above about 5 × 10^5 events/s.
 3. **The long-gap rule and the other spec 0.2.0 changes** (math_spec Appendix C).
-4. **The CUSUM threshold.** The inherited $b_{\mathrm{cs}}=14$ gives 32 false alarms per hour at $D=4$ on stationary data. It should be recalibrated in Phase 5 (benchmarks.md Section 7).
-5. **License**, still unset.
+4. **The CUSUM threshold.** The inherited $b_{\mathrm{cs}}=14$ gives 32 false alarms per hour at $D=4$ on stationary data. Settled for now: interim default 30 (math_spec 0.2.1), with a calibration sweep in Phase 5.
+5. **License.** Settled: MIT.
 
 ## References
 

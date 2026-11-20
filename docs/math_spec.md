@@ -4,7 +4,7 @@ This document specifies the mathematics behind PulseLOB: real-time cross-venue o
 
 | Field | Value |
 |---|---|
-| Spec version | 0.2.0 (changes in [Appendix C](#appendix-c-changes-in-spec-version-020)) |
+| Spec version | 0.2.1 (changes in [Appendix C](#appendix-c-changes-in-spec-versions-020-and-021)) |
 | Phase | 1 (mathematical research and formulation); revised in Phase 3 |
 | Status | Implemented in Phase 3 (`include/pulselob/`); verification results in Section 10 |
 | Date | 2026-11-20 |
@@ -949,7 +949,7 @@ These are starting values, not results.
 | Kernel bank | $(r_q,\beta_q)$ | (1, 1000), (2, 200), (2, 50), (1, 1) per second |
 | Marks | $c_u,c_L,c_\iota$; $u_{\max}$, $L_{\max}$; $\eta_g$, $\eta_\nu$ | 0.5, 0.5, 0.5; $10^4$, 50; 0.01, 0.01 |
 | Forgetting | slow / fast half-life; dwell | 60 s / 5 s; 10 s |
-| CUSUM | $\varrho$; $b_{\mathrm{cs}}$ | 1.5; 14 (set by in-control run-length simulation) |
+| CUSUM | $\varrho$; $b_{\mathrm{cs}}$ | 1.5; 30 (interim, conservative; set by in-control run-length simulation in Phase 5) |
 | Ridge | $T_\omega$; heartbeat $T_{\mathrm{hb}}$ | 1 s; 100 ms |
 | Stability | $\rho_{\max}$; $\chi$; $\epsilon_v$; $\rho_{\mathrm{crit}}$ | 0.97; 1.01; $10^{-6}$; 1.0 |
 | Bounds | $\mu_{\min}$, $\mu_{\max}$ | $10^{-4}$ /s, $10^{6}$ /s |
@@ -957,7 +957,7 @@ These are starting values, not results.
 | Toxicity | $H$ | 50 ms |
 | Control | $\gamma$, $k$, $T_h$, $\delta_{\max}$, $J^b$, $J^I$, $\Delta_\tau$, $c_{\min}$, $c_{\mathrm{rq}}$ | calibrated in Phase 5; $\Delta_\tau=0.1$, $c_{\min}=250$ ms, $c_{\mathrm{rq}}=5$ ms as starting points |
 
-## Appendix C. Changes in spec version 0.2.0
+## Appendix C. Changes in spec versions 0.2.0 and 0.2.1
 
 Phase 3 implemented the spec and verified it against definition-level references. These changes resulted; none alters a theorem's statement.
 
@@ -969,3 +969,4 @@ Phase 3 implemented the spec and verified it against definition-level references
 6. **CUSUM batch rule (Section 5.5).** Resets take effect when a tie batch closes, which makes the detector order-invariant within a batch.
 7. **Erratum (Section 7.2).** In the general formula for $\bar k_q(H)$ the power of $\beta_q$ is $r_q-1-l$, not $l$. The Erlang-1 and Erlang-2 special cases were already correct.
 8. **Variance term (Theorem 19).** $\mathbb E[J_i^2]$ is defined under (A2).
+9. **Version 0.2.1: CUSUM threshold.** The default $b_{\mathrm{cs}}$ is raised from 14 to 30 (Appendix B). At $D=4$, with eight CUSUMs and plug-in residuals, a threshold of 14 gave 32 false alarms per hour on stationary data, and 30 gave none in 30 minutes. At 30 the detector rarely fires on a moderate coupling shift: recovery then proceeds at the slow forgetting half-life. The value is interim until the Phase 5 calibration sweep of false-alarm rate against detection delay.

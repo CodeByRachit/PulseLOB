@@ -1,6 +1,6 @@
-# PulseLOB: Phase 3 Benchmarks
+# PulseLOB: Benchmarks
 
-Every number in this document comes from a run of the code at version 0.3.0 on the machine described below. The raw outputs are committed in [`bench/results/`](../bench/results/). Nothing here is estimated or extrapolated.
+Every number in this document comes from a run of the code on the machine described below: Sections 1–7 at version 0.3.0 (the engine), Section 8 at version 0.4.0 (the Python bindings). The raw outputs are committed in [`bench/results/`](../bench/results/). Nothing here is estimated or extrapolated.
 
 ## Environment
 
@@ -119,3 +119,18 @@ The information form is faster at $D=4$ because a fresh factorization ($P^3/6\ap
 ## 7. Detector calibration input (for Phase 5)
 
 `Regime.InControlFalseAlarmRate` measures false alarms per hour on a stationary $D=4$ stream (193,274 events over 30 minutes): 32 at $b_{\mathrm{cs}}=14$ (the default inherited from the $D=2$ experiment), 14 at $b_{\mathrm{cs}}=20$ and 0 at $b_{\mathrm{cs}}=30$. With $2D=8$ CUSUMs and plug-in residuals the default threshold is too low for $D=4$. It still detects the regime shift of V10 (three alarms within 60 s of the shift, against four in the 300 s before it). The threshold should be recalibrated by in-control run-length simulation in Phase 5, as math_spec Section 5.5 anticipates.
+
+Since version 0.4.0 the default is the conservative interim value $b_{\mathrm{cs}}=30$ (math_spec 0.2.1). On the V10 shift, over seeds 2024, 7 and 11, it raised no false alarm before the shift and fired on none of the three shifts within the run. Recovery then follows the slow forgetting half-life (60–70 s to cover half of the step), against 17–68 s at $b_{\mathrm{cs}}=14$, which also produced 1–4 false alarms in the 300 s before the shift. The Phase 5 sweep will choose the operating point between false alarms and detection delay.
+
+## 8. Python batch throughput (version 0.4.0)
+
+`python -m pulselob.bench` writes 4,993,072 events (2,496,535 trades, plus book updates and heartbeats, from the `two_sided` scenario) to a `.plev` file. It then times, on that one file, the native C++ driver `pulselob-replay` and `pulselob.Engine.run` reading the memory-mapped file in place with the GIL released. Each figure is the best of three runs with a fresh engine ([raw output](../bench/results/python-batch-apple-m4.json)).
+
+| Path | Million events/s |
+|---|---|
+| native driver, inline, information form | 1.77 |
+| Python `Engine.run`, inline | 1.82 |
+| Python `Engine.run`, inline, model state sampled every 1,000 steps | 1.82 |
+| Python `Engine.run`, split mode | 7.86 |
+
+The Python path runs at 1.03 times the native driver's speed, which is within run-to-run variation: the binding adds no measurable cost per event. On the same run, generating the 5 million events took 0.54 s. A Python test also checks that `Engine.run` and the native driver produce identical output bytes on the same file, for both estimators and both kernel banks.

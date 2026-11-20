@@ -39,6 +39,9 @@ std::vector<testkit::ChannelEvent> simulate_shift(std::uint64_t seed) {
 Path run(const std::vector<testkit::ChannelEvent>& ev, bool detector) {
   auto cfg = testkit::default_engine_config().model;
   cfg.cusum_enabled = detector;
+  // The detector mechanism is checked at the sensitive threshold of the D = 2 experiment (14). The
+  // engine default is the conservative 30, which rarely fires on a shift this moderate.
+  cfg.cusum_threshold = 14.0;
   auto m = std::make_unique<ModelT>(cfg);
   Path out;
   std::uint64_t alarms = 0;

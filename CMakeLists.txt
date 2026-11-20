@@ -74,6 +74,10 @@ if(PULSELOB_BUILD_BENCHMARKS)
   add_subdirectory(bench)
 endif()
 
+if(PULSELOB_BUILD_TOOLS OR PULSELOB_BUILD_PYTHON)
+  add_subdirectory(tools)
+endif()
+
 if(PULSELOB_BUILD_PYTHON)
   add_subdirectory(bindings)
 endif()

@@ -17,6 +17,7 @@ ALLOWED: dict[str, set[str]] = {
     "hawkes": {"core"},
     "control": {"core", "hawkes"},
     "engine": {"core", "feed", "hawkes", "control"},
+    "synth": {"core", "feed"},  # Phase 4: synthetic data
     "sim": {"core", "feed", "engine"},  # Phase 5
 }
 THIRD_PARTY = ("pybind11/", "gtest/", "gmock/", "benchmark/", "Eigen/")

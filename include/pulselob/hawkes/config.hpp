@@ -30,7 +30,9 @@ struct ModelConfig {
   // Time-rescaling CUSUM (Section 5.5).
   bool cusum_enabled = true;
   double cusum_rho = 1.5;
-  double cusum_threshold = 14.0;
+  // Interim conservative default (spec 0.2.1): 14 gave 32 false alarms per hour at D = 4; 30 gave
+  // none in 30 minutes but rarely fires on moderate shifts. Calibrated by a sweep in Phase 5.
+  double cusum_threshold = 30.0;
 
   // Ridge prior (Section 5.4): per-coordinate strength omega_p and prior mean Theta_0 (D x P).
   core::FixedVector<P> omega{};
