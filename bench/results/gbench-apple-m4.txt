@@ -1,0 +1,23 @@
+Benchmark                                                          Time             CPU   Iterations UserCounters...
+BM_StdExp_median                                                1.99 ns         1.99 ns            5 items_per_second=503.734M/s
+BM_StdExp_stddev                                               0.007 ns        0.005 ns            5 items_per_second=1.18337M/s
+BM_SpscPushPopSameThread_median                                 6.79 ns         6.78 ns            5 items_per_second=147.394M/s
+BM_SpscPushPopSameThread_stddev                                0.787 ns        0.786 ns            5 items_per_second=18.0711M/s
+BM_ValidateMarketEvent_median                                   1.75 ns         1.75 ns            5 items_per_second=572.719M/s
+BM_ValidateMarketEvent_stddev                                  0.005 ns        0.004 ns            5 items_per_second=1.35042M/s
+BM_EngineOnEvent<hawkes::CholeskyEstimator<Shape>>_median        550 ns          550 ns            5 items_per_second=1.81873M/s
+BM_EngineOnEvent<hawkes::CholeskyEstimator<Shape>>_stddev       1.95 ns         1.89 ns            5 items_per_second=6.29378k/s
+BM_EngineOnEvent<hawkes::PotterEstimator<Shape>>_median         1389 ns         1389 ns            5 items_per_second=719.948k/s
+BM_EngineOnEvent<hawkes::PotterEstimator<Shape>>_stddev         5.35 ns         4.94 ns            5 items_per_second=2.55485k/s
+BM_SplitEngineHotThread_median                                   123 ns          123 ns            5 items_per_second=8.15805M/s
+BM_SplitEngineHotThread_stddev                                  1.45 ns        0.716 ns            5 items_per_second=47.2435k/s
+BM_ComputeInterval/1_median                                     77.2 ns         77.2 ns            5
+BM_ComputeInterval/1_stddev                                    0.682 ns        0.677 ns            5
+BM_ComputeInterval/1000_median                                   109 ns          109 ns            5
+BM_ComputeInterval/1000_stddev                                 0.473 ns        0.445 ns            5
+BM_ComputeInterval/100000_median                                67.8 ns         61.6 ns            5
+BM_ComputeInterval/100000_stddev                                11.3 ns         5.04 ns            5
+BM_ProjectRow_median                                            69.3 ns         69.2 ns            5
+BM_ProjectRow_stddev                                           0.781 ns        0.612 ns            5
+BM_Forecast_median                                              50.6 ns         50.6 ns            5
+BM_Forecast_stddev                                             0.930 ns        0.691 ns            5

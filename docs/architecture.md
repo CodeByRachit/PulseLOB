@@ -2,13 +2,13 @@
 
 | Field | Value |
 |---|---|
-| Document version | 0.2.0 |
-| Phase | 2 (repository architecture, build system, memory layout, data schemas) |
-| Implements | [math_spec.md](math_spec.md), spec version 0.1.0 |
-| Status | Draft for review |
+| Document version | 0.3.0 |
+| Phase | 2 (architecture), updated in 3 (engine as built) |
+| Implements | [math_spec.md](math_spec.md), spec version 0.2.0 |
+| Status | Phase 3 engine built and verified; measurements in [benchmarks.md](benchmarks.md) |
 | Date | 2026-11-20 |
 
-This document fixes how the mathematics of the spec becomes software. The repository already contains everything below that is marked **(built)**: the build system, the schema and layout types, the SPSC ring buffer, the Python package skeleton and CI. These compile and are tested on Linux (GCC 13, Clang 18) and macOS arm64 (AppleClang). Everything marked **(Phase n)** is specified here and implemented in that phase. Phase 2 contains no model algorithms.
+This document fixes how the mathematics of the spec becomes software. Everything marked **(built)** exists and is tested on Linux (GCC 13, Clang 18, with AddressSanitizer, UBSan and ThreadSanitizer) and macOS arm64 (AppleClang). Phase 2 built the build system, the schema and layout types, the SPSC ring, the Python package skeleton and CI. Phase 3 built the model engine: the `hawkes`, `control` and `engine` components, the event mapper, the seqlock and split mode. Everything marked **(Phase n)** is specified here and implemented in that phase.
 
 ---
 
@@ -20,11 +20,12 @@ This document fixes how the mathematics of the spec becomes software. The reposi
 4. **Exact integers at the edges, doubles inside.** Timestamps are `int64` nanoseconds. Prices and quantities are `int64` fixed-point with scale $10^{-8}$, which is exact for every Binance value. The model computes in IEEE double with no fast-math and no FMA contraction, so a run is reproducible (Section 4.3).
 5. **One 64-byte event record everywhere.** The same `MarketEvent` bytes serve as ring slots, NumPy structured arrays and memory-mapped `.plev` files. Ingestion is zero-copy from a file all the way to the engine (Section 7).
 6. **Arrays of structures for transport, structures of arrays for model state.** Events are consumed whole, while model state is swept across channels and coordinates (Section 5.1).
-7. **Deterministic single-threaded engine by default.** Optionally, the estimator moves to a second core and publishes parameters through a seqlock; this resolves decision 4 of the math spec (Section 6). Backtests and tests always use the deterministic mode.
+7. **Deterministic single-threaded engine by default.** Optionally, the estimator moves to a second core and publishes parameters through a seqlock; this resolves decision 4 of the math spec (Section 6). Backtests and tests always use the deterministic mode. Phase 3 measured both (Section 6.1): split mode cuts the hot thread's tick-to-quote time about 6 times, with parameters lagging by a median of one estimator step.
 8. **128-byte false-sharing separation.** This covers the 128-byte cache lines of Apple M-series cores, measured on the development machine, and x86 adjacent-line prefetching. Data arrays use 64-byte alignment.
-9. **No exceptions or RTTI on the hot path.** Errors are status codes plus counters. Configuration is validated at construction, which may throw because it is cold code.
+9. **No exceptions or RTTI.** Errors are status codes plus counters. Configuration is checked by `validate()`, which returns the first violated condition; as built, no PulseLOB code throws (Section 4.2).
 10. **Python packaging via scikit-build-core and pybind11**, with the version read from `VERSION`.
 11. **A data constraint found in this phase.** Binance's public archives have **no spot top-of-book data at any date**. They have futures top-of-book only for 2023-05-16 to 2024-03-30 (BTCUSDT). This affects Phases 4 and 5; Section 7.4 gives the options.
+12. **Information-form estimator by default (Phase 3).** Both back-ends of math_spec Section 5.4.1 are implemented. The information form (stored $\mathbf M$, fresh Cholesky solve per event) is 2.7 times faster than the square-root (Potter) form at $D=4$ and matches the definition-level reference about 300 times more closely. Potter remains selectable as a template argument.
 
 ---
 
@@ -38,21 +39,25 @@ PulseLOB/
 ├── include/pulselob/              public C++ headers (header-only core)
 │   ├── version.hpp.in             generated from VERSION                                   (built)
 │   ├── core/                      platform constants, time, fixed point, fixed matrices,
-│   │                              model shape                                              (built)
-│   ├── feed/                      MarketEvent schema, SPSC ring                             (built)
-│   │                              event mapper, merger                                      (Phase 3/4)
-│   ├── hawkes/                    kernel bank, state, estimator, stability, forecaster     (Phase 3)
-│   ├── control/                   quoting law, pull state machine                          (Phase 3)
-│   ├── engine/                    per-event pipeline, replay driver, counters              (Phase 3)
+│   │                              model shape, psi, linear algebra, FTZ guard, seqlock     (built)
+│   ├── feed/                      MarketEvent schema, SPSC ring, event mapper              (built)
+│   │                              stream merger                                             (Phase 4)
+│   ├── hawkes/                    kernel bank, estimator (2 back-ends), CUSUM, stability,
+│   │                              forecasts and toxicity, marks, model                     (built)
+│   ├── control/                   quoting law, pull triggers, kill switch, throttle        (built)
+│   ├── engine/                    configuration, decision layer, inline engine, split
+│   │                              engine, replay driver, Signal, counters                  (built)
 │   └── sim/                       market-making simulator                                  (Phase 5)
 ├── bindings/module.cpp            pybind11 module pulselob._core                           (built)
 ├── python/pulselob/               Python package: schema, .plev I/O                        (built)
 │                                  config, data loaders, generators, simulator, analysis    (Phase 3–6)
-├── tests/cpp/                     GoogleTest unit tests                                    (built)
+├── tests/cpp/                     GoogleTest unit, equivalence, stress tests; alloc proof  (built)
+├── tests/support/                 Ogata simulator, quadrature references, test configs     (built)
+├── tests/fixtures/                Python-reference cross-check fixture                     (built)
 ├── tests/python/                  pytest tests                                             (built)
-├── bench/                         Google Benchmark micro-benchmarks                        (built)
+├── bench/                         Google Benchmark suite, latency report                   (built)
 ├── docs/                          math_spec.md (Phase 1), architecture.md (this document)
-├── research/                      numerical validation of the math spec (Phase 1)
+├── research/                      spec validation (Phase 1), definition-level reference (Phase 3)
 ├── scripts/                       version and layering checks                              (built)
 ├── pyproject.toml                 Python build (scikit-build-core)                         (built)
 └── .github/workflows/             CI, weekly research run, tag-driven releases             (built)
@@ -68,9 +73,9 @@ The prompt for this project suggested `include/hawkes_toxicity/`. The headers li
 
 | Component (namespace) | Responsibility | Spec sections | May depend on | Phase |
 |---|---|---|---|---|
-| `core` | platform constants, time, fixed point, fixed-size matrices, model shape, ψ functions, small linear-algebra kernels, FP environment | 4.2, 4.6–4.8 | standard library only | 2 (types), 3 (kernels) |
-| `feed` | `MarketEvent` schema and validation, SPSC ring, event mapper (channel and mark from events and book state), stream merger | 2.2, 2.3, 4.4, 4.5 | `core` | 2 (schema, ring), 3/4 |
-| `hawkes` | kernel bank and state recursion, compensators, least-squares estimator (Potter, ridge replenishment), CUSUM, stability projection, forecasts and toxicity | 3–7 | `core` | 3 |
+| `core` | platform constants, time, fixed point, fixed-size matrices, model shape, ψ functions, small linear-algebra kernels, FP environment, seqlock | 4.2, 4.6–4.8 | standard library only | 2 (types), 3 (kernels) |
+| `feed` | `MarketEvent` schema and validation, SPSC ring, event mapper (channel and raw mark features from events and book state), stream merger | 2.2, 2.3, 4.4, 4.5 | `core` | 2 (schema, ring), 3 (mapper), 4 (merger) |
+| `hawkes` | kernel bank and state recursion, compensators, least-squares estimator (information form and Potter, ridge replenishment), CUSUM, stability projection, forecasts and toxicity, mark normalization | 2.3, 3–7 | `core` | 3 |
 | `control` | quoting law, pull and kill-switch state machines, message throttling | 8 | `core`, `hawkes` | 3 |
 | `engine` | per-event pipeline (spec Section 9), counters, snapshot/restore, replay driver | 9 | `core`, `feed`, `hawkes`, `control` | 3 |
 | `sim` | latency and queue-position simulator, fills, fees, PnL, markouts | (Phase 5 spec) | `core`, `feed`, `engine` | 5 |
@@ -192,7 +197,7 @@ The CMake minimum is 3.25 (presets v6, `FetchContent ... SYSTEM`). Development w
 * $0<\mu_{\min}<\mu_{\max}$; $c_\iota<1$; all rates positive and finite;
 * every instrument in the channel map present in the instrument table.
 
-Construction is the only code allowed to throw.
+As built, no PulseLOB code throws: every public header compiles with `-fno-exceptions`. `engine::validate(config)` returns `nullptr` or a static string naming the first violated condition (it checks every component's `validate` and their consistency), and the engine's constructor has the precondition that validation passed. The Python binding will turn a non-null result into `ValueError` (Phase 4).
 
 ### 4.3 Floating point
 
@@ -230,48 +235,32 @@ Eigen was considered and rejected for this role:
 * **Over-alignment pitfalls.** Fixed-size vectorizable Eigen types carry known pitfalls when stored in structs that are themselves heap-allocated.
 * **Small surface.** The estimator needs only five kernels: row-wise axpy, matrix-vector product, transposed matrix-vector product, rank-one update and scaling. They are written once in Phase 3 and tested against long-double references.
 
-### 5.3 Engine state for `DefaultShape` (specification for Phase 3)
+### 5.3 Engine state for `DefaultShape` (built)
 
-The sizes follow from the layout rules ($P=17\to$ stride 24; $D=4\to$ stride 8). Phase 3 will `static_assert` them.
+The Phase 2 plan budgeted about 12 KB. The engine as built is larger, for two measured reasons: the moment matrix $\mathbf M$ is stored (for the long-gap refactorization and the information-form estimator, math_spec 5.4.1), and the engine owns a copy of its configuration. Sizes from `sizeof` on AppleClang 21, arm64; `tests/cpp/test_engine.cpp` asserts the totals stay within a 24 KB (information form) and 28 KB (Potter) L1 budget.
 
-**Hot block: read on every event, used for inference.**
-
-| Field | Container | Bytes |
+| Component | Contents | Bytes |
 |---|---|---|
-| Erlang states $R^{q,(n)}_j$ (6 rows × channels) | `FixedMatrix<6, 4>` | 384 |
-| Pending jumps $\boldsymbol\pi$ | `FixedVector<4>` | 64 |
-| Served parameters $\hat{\boldsymbol\Theta}$ | `FixedMatrix<4, 17>` | 768 |
-| Regressor $\mathbf z$ | `FixedVector<17>` | 192 |
-| $\boldsymbol\lambda$, $\boldsymbol\lambda^\infty$, $\mathbf v$, $\boldsymbol\Lambda$ | 4 × `FixedVector<4>` | 256 |
-| CUSUM $C^\uparrow$, $C^\downarrow$ | `FixedMatrix<2, 4>` | 128 |
-| Mark statistics $\nu_j$, $\bar g_j$ | `FixedMatrix<2, 4>` | 128 |
-| Last best bid/offer per venue (for $\iota$) | 2 × 32 B | 64 |
-| Decay rates and horizon constants ($\beta_q$, $e^{-\beta_qH}$, $\psi_n(\beta_qH)$) | `FixedMatrix<3, 4>` | 192 |
-| **Hot total** | | **2,176** |
+| `hawkes::KernelState` | $R^{q,(n)}_j$ (6 rows × 4 channels, padded) and the pending tie buffer $\boldsymbol\pi$ | 448 |
+| `hawkes::IntervalTerms` | per-interval decay factors, compensator coefficients, $\mathbf F$ (7 × 7) | 576 |
+| `hawkes::LsStatistics` | $\mathbf M$ (17 × 17), $\mathbf C$, $\boldsymbol\Theta_0$, $\boldsymbol\omega$, $\boldsymbol\omega^{\mathrm{eff}}$, interval scratch $\mathbf V$ and $\mathbf F\mathbf V$ | 7,872 |
+| `hawkes::CholeskyEstimator` | statistics, $\tilde{\boldsymbol\Theta}$, factorization scratch | 12,928 |
+| `hawkes::PotterEstimator` | statistics, $\mathbf U$, $\tilde{\boldsymbol\Theta}$, rank-one and refactor scratch | 16,704 |
+| `hawkes::RegimeDetector` | CUSUM statistics, residual accumulators, forgetting schedule | 320 |
+| `hawkes::Served` | $\hat{\boldsymbol\Theta}$, $\hat{\mathbf G}$, $\boldsymbol\lambda^\infty$, $\mathbf v$, diagnostics (the seqlock payload in split mode) | 1,216 |
+| `hawkes::Model` (information form) | the above plus regressor and compensator scratch | 16,256 |
+| `engine::DecisionLayer` | forecaster constants, quote law, triggers, kill switch, throttles, venue clocks | 1,216 |
+| `engine::EngineConfig` | the configuration copy (cold) | 1,792 |
+| **`engine::Engine` (information form)** | everything, including mapper, marks and the current `Signal` | **20,992** |
+| `engine::Engine` (Potter) | | 24,768 |
 
-**Estimator block: written on every event.**
-
-| Field | Container | Bytes |
-|---|---|---|
-| Inverse square-root factor $\mathbf U$ | `FixedMatrix<17, 17>` | 3,264 |
-| $\tilde{\boldsymbol\Theta}$, $\mathbf C$, prior $\boldsymbol\Theta_0$ | 3 × `FixedMatrix<4, 17>` | 2,304 |
-| Ridge $\boldsymbol\omega$, $\boldsymbol\omega^{\mathrm{eff}}$ | 2 × `FixedVector<17>` | 384 |
-| Interval scratch $\mathbf V$ | `FixedMatrix<7, 17>` | 1,344 |
-| $\mathbf F$ and its pivoted Cholesky rows | 2 × `FixedMatrix<7, 7>` | 896 |
-| Potter scratch $\mathbf w$, $\mathbf a$, $\mathbf U\mathbf a$, $\mathbf k$ | 4 × `FixedVector<17>` | 768 |
-| **Estimator total** | | **8,960** |
-
-**Cold block.** Configuration (about 0.5 KB), counters (about 0.3 KB) and the current `Signal` (128 B).
-
-**Total: about 12 KB.** This fits in L1D on every target: 64 KB reported by `hw.l1dcachesize` on the development M4, and 48 KB on recent x86 cores. In steady state the only memory traffic per event is the sequential 64-byte input record and the 128-byte output record.
-
-Ordering within the engine object is: the hot block first, then the estimator block, then the cold block. Each block starts on a 64-byte boundary. In split-thread mode (Section 6.3) the estimator block lives in the estimator thread's object instead, and the hot thread receives $\hat{\boldsymbol\Theta}$ through the seqlock.
+This fits L1D on every target: 128 KB per performance core on the development M4 (`hw.perflevel0.l1dcachesize`) and 48 KB on recent x86 cores. Hot data (kernel state, served parameters, decision layer) come first in the object; the statistics follow; the configuration copy is cold. In split mode the estimator-side `Model` lives on the estimator thread, and the hot thread's working set is the kernel state, the served snapshot and the decision layer, about 3 KB.
 
 ### 5.4 The zero-allocation contract
 
 * **Fixed size.** Every engine member is a fixed-size container, so construction performs one allocation (the engine object, via aligned `new`) or none (static or stack storage).
 * **Large rings.** These are allocated once at start-up through `std::make_unique`, which honors over-alignment.
-* **Enforcement (Phase 3).** A dedicated test binary replaces the global `operator new` and `operator delete` with counting versions, then asserts that the counter stays at zero across $10^6$ replayed events after construction. It runs under ASan in CI as well.
+* **Enforcement (built).** `tests/cpp/alloc/test_zero_alloc.cpp` is its own binary that replaces every global `operator new` and `operator delete` (plain, array, aligned, nothrow, sized) with counting versions. After construction it replays $10^6$ market events (2 × 10^5 in debug and sanitizer builds) plus 1,000 heartbeats through the inline engine with each estimator back-end, and a stream through the split engine with both threads running, and asserts that zero allocations occurred. It runs in every CI configuration, including ASan and TSan.
 
 ---
 
@@ -297,10 +286,12 @@ flowchart LR
 
 | Mode | Threads | Deterministic | Used for |
 |---|---|---|---|
-| **Inline (default)** | one engine thread; the estimator runs inside each event | yes, bitwise | all tests, replays, backtests; production unless Phase 3 measures it too slow |
-| Split | engine thread for state, inference and control; estimator thread fed by a second SPSC ring, publishing $\hat{\boldsymbol\Theta}$ by seqlock | no: parameter freshness depends on timing | production latency option, chosen in Phase 3 from measurements |
+| **Inline (default)** | one engine thread; the estimator runs inside each event | yes, bitwise | all tests, replays, backtests, the Phase 5 simulator |
+| Split (built) | engine thread for state, inference and control; estimator thread fed by a second SPSC ring, publishing $\hat{\boldsymbol\Theta}$ by seqlock | no: parameter freshness depends on timing | live quoting when the latency budget is below about 1 µs |
 
-Split mode is safe because parameters move on a scale of seconds (spec Section 6.6). A served parameter set that is a few microseconds stale has no measurable effect. The estimator publishes at most every $T_{\mathrm{pub}}$ (default 1 ms). The hot thread checks the sequence number with one load per event, and copies the parameters (about 1 KB) only when that number has changed.
+**Measured (Phase 3, [benchmarks.md](benchmarks.md)).** On the M4, inline tick-to-quote for a trade has a p50 of 0.99 µs and a p99 of 1.1–1.3 µs, at 1.8 M events/s. The split hot thread has a p50 of 0.16 µs and a p99 of 0.2–0.4 µs, at 8.4 M events/s, with parameters lagging by a median of one estimator step. The estimator thread alone sustains 1.15 M steps/s. After `drain()` the split engine's served parameters equal the inline engine's bit for bit (tested), because the estimator thread runs the same model on the same steps.
+
+Split mode is safe because parameters move on a scale of seconds (spec Section 6.6). A served parameter set that is a few microseconds stale has no measurable effect. As built, the estimator publishes whenever its ring is drained and at least every 32 steps during a backlog. The hot thread checks the sequence number with one load per event and copies the parameters (1,216 bytes) only when that number has changed. Signals computed with parameters more than 64 steps old carry the `kStaleParameters` flag.
 
 ### 6.2 SPSC ring buffer (built: `feed/spsc_ring.hpp`)
 
@@ -312,7 +303,7 @@ Split mode is safe because parameters move on a scale of seconds (spec Section 6
 * **Overflow policy.** The producer never blocks. When the ring is full, it counts the dropped event and marks an overflow. On its next successful push it first inserts a `Status` event with code `RingOverflow`. The engine then raises the feed-health kill switch (spec Section 8.6), because a model that silently lost events is not trustworthy.
 * **Measured** (Apple M4, AppleClang 21, Release, native tuning, median of 5): push plus pop on one thread costs 7.8 ns. That is the ring's own overhead. The cross-core cost needs pinned threads and is measured in Phase 3.
 
-### 6.3 Seqlock parameter publication (split mode, Phase 3)
+### 6.3 Seqlock parameter publication (built: `core/seqlock.hpp`)
 
 A plain seqlock reads non-atomic data during a concurrent write, which is a data race and undefined behavior in the C++ memory model. The construction used here, following Boehm (2012), avoids that:
 
@@ -326,7 +317,7 @@ reader:  do { s1 = seq.load(acquire); if (s1 is odd) continue;
          } while (s1 != s2);
 ```
 
-`std::atomic_ref<double>` (C++20) makes every payload access atomic, so there is no race. The fences give the reader a consistent snapshot whenever `s1 == s2` and `s1` is even. The sequence number sits on its own 128-byte block.
+`std::atomic_ref<std::uint64_t>` (C++20) over the payload's words makes every payload access atomic, so there is no race; ThreadSanitizer runs the torn-read test and the split-engine test in CI. The fences give the reader a consistent snapshot whenever `s1 == s2` and `s1` is even. The sequence number sits on its own 128-byte block.
 
 ### 6.4 Thread placement
 
@@ -434,18 +425,18 @@ Mapping to `MarketEvent`:
 
 The recommendation is (a), started early in Phase 4, with (c) as the immediately available validation set and the synthetic generator as the main controlled experiment. Option (b) is worth it if a long real-data history becomes a requirement for the paper.
 
-### 7.5 Channel events (internal, Phase 3)
+### 7.5 Channel events (built)
 
-`feed::EventMapper` turns `Trade` events into channel events $(t_k, d_k, g_k)$ using the configured map from (instrument, side) to channel. It keeps the last `BookTop` per instrument to compute $\iota$, and computes the sweep depth $L=\lvert\texttt{px0}-\texttt{px1}\rvert/\text{tick}$. `BookTop` events update book state only, unless depletion channels are enabled. `Heartbeat` events advance time. `Status` events feed the kill switch. These records are internal and never cross a module boundary.
+`feed::EventMapper` turns `Trade` events into raw channel features (channel $d_k$, size, sweep depth $L=\lvert\texttt{px0}-\texttt{px1}\rvert/\text{tick}$, and $\iota=s_{d_k}\,\mathrm{OBI}$) using the configured map from (instrument, side) to channel and the last `BookTop` of the trade's instrument. A missing book gives $\iota=0$ and is counted. The mark normalization (log-median tracker and EWMA of math_spec 2.3) lives in `hawkes::MarkNormalizer`, because it is model math; the engine computes the mark with `peek` and applies the statistics update with `commit` only if the model accepts the step. `BookTop` events update the book and produce a read-only signal. `Heartbeat` events step the model. `Status` events trip the kill switch. These records never cross a module boundary.
 
-### 7.6 `Signal`, output record (Phase 3)
+### 7.6 `Signal`, output record (built: `engine/signal.hpp`)
 
 Size is `round_up(16 + 8D + 72, 64)` bytes, which is 128 for $D=4$.
 
 | Offset ($D=4$) | Type | Field |
 |---|---|---|
 | 0 | int64 | `t_ns` (engine clock of the event that produced it) |
-| 8 | uint32 | `flags`: warming up, ask pulled, bid pulled, kill switch, fast forgetting, projection active |
+| 8 | uint32 | `flags`: warming up, ask pulled, bid pulled, kill switch, fast forgetting, projection active, no quote book, stale parameters (split mode) |
 | 12 | uint16 | `status` (input `EventCheck` or engine status) |
 | 14 | uint16 | reserved |
 | 16 | double[4] | `lambda` (served intensities at $t+$) |
@@ -493,24 +484,34 @@ The native code accepts an array as events if and only if it is 1-D, has itemsiz
 
 * **No logging on the hot path.** Every guard of the spec increments a named counter: rejected events by `EventCheck` code, clamped and rejected out-of-order events, cutoff activations, projection activations, CUSUM alarms, kill-switch causes and ring overflows. Counters live in the cold block and are exposed to Python.
 * **Status, not exceptions.** `on_event` returns a status (accepted, clamped, rejected with a reason), and the same code is copied into `Signal::status`.
-* **Snapshot and restore (Phase 3).** The full engine state is a trivially copyable object. A snapshot is a `memcpy`, which supports checkpointed replays and the determinism test (run, snapshot, restore, re-run, compare bytes).
+* **Snapshot and restore (built).** The engine is trivially copyable (asserted at compile time). A snapshot is a copy, and the tests check that a restored copy continues bit for bit like the uninterrupted run. State comparisons in tests are field by field: the 64-byte-aligned types contain padding, whose bytes are indeterminate, so `memcmp` over whole objects is not a valid equality test.
 
-Planned engine interface (Phase 3):
+Engine interface (built: `engine/engine.hpp`, `engine/split_engine.hpp`):
 
 ```cpp
 template <class Shape>
-class Engine {
+const char* validate(const EngineConfig<Shape>& config) noexcept;  // nullptr or the violated condition
+
+template <class Shape, class Estimator = hawkes::CholeskyEstimator<Shape>>
+class Engine {  // deterministic, single-threaded, trivially copyable
  public:
-  explicit Engine(const Config<Shape>& config);               // validates; may throw (cold)
-  Status on_event(const feed::MarketEvent& e) noexcept;        // hot path, Section 9 of the spec
+  explicit Engine(const EngineConfig<Shape>& config) noexcept;  // precondition: validate() == nullptr
+  Status on_event(const feed::MarketEvent& e) noexcept;          // math_spec Section 9
   Status on_heartbeat(core::TimestampNs t) noexcept;
+  void set_inventory(double q) noexcept;                         // non-finite: ignored, counted, kill switch
   const Signal<Shape::D>& signal() const noexcept;
-  const Counters& counters() const noexcept;
+  const EngineCounters& counters() const noexcept;
+  const hawkes::Model<Shape, Estimator>& model() const noexcept;
 };
 
-template <class Shape, class Sink>  // Sink: concept with noexcept on_signal(const Signal&)
-std::size_t replay(Engine<Shape>&, std::span<const feed::MarketEvent>, Sink&) noexcept;
+template <class Shape, class Estimator = hawkes::CholeskyEstimator<Shape>>
+class SplitEngine;  // same on_event; estimator thread fed by an SPSC ring, parameters by seqlock
+
+template <class EngineT, class Sink>  // Sink: noexcept on_signal(const Signal&)
+std::size_t replay(EngineT&, std::span<const feed::MarketEvent>, Sink&) noexcept;
 ```
+
+`Status` is `Accepted`, `Clamped` (out of order within $\varepsilon_{\mathrm{ooo}}$), `RejectedInvalid`, `RejectedOutOfOrder`, `Ignored` (unmapped instrument or side) or `RejectedNonFinite`. Rejections leave every model-side state unchanged (tested field by field).
 
 ---
 
@@ -523,18 +524,22 @@ std::size_t replay(Engine<Shape>&, std::span<const feed::MarketEvent>, Sink&) no
 | Layout and schema (sizes, offsets, alignment, padding, validation) | GoogleTest + `static_assert` | `tests/cpp` | all C++ jobs | 2 (built) |
 | Concurrency (SPSC) | GoogleTest under ThreadSanitizer | `tests/cpp` | tsan job | 2 (built) |
 | Python schema mirror, zero-copy, `.plev` | pytest | `tests/python` | python jobs | 2 (built) |
-| Equivalence V1–V9 (recursions against brute force, 1e-10) | GoogleTest with long-double references | `tests/cpp` | all C++ jobs | 3 |
-| Statistical V10 (regime-shift recovery) | GoogleTest, seeded | `tests/cpp` | release jobs | 3 |
-| Stress V11 (bursts, extreme gaps, NaN/Inf, disorder), zero-allocation, determinism | GoogleTest | `tests/cpp` | asan + release | 3 |
+| Equivalence V1–V9 (recursions against brute force, 1e-10) | GoogleTest with direct-sum and quadrature references, and a 50-digit table for $\psi$ | `tests/cpp` | all C++ jobs | 3 (built) |
+| Whole-pipeline cross-check against a definition-level Python reference | GoogleTest reading `tests/fixtures/phase3_crosscheck.txt`; a CI job regenerates the fixture | `tests/cpp`, `research/phase3` | all C++ jobs, reference-fixture | 3 (built) |
+| Statistical V10 (regime-shift recovery, false-alarm rate) | GoogleTest, seeded | `tests/cpp` | all C++ jobs | 3 (built) |
+| Stress V11 (bursts, extreme gaps, NaN/Inf, disorder), determinism, snapshot/restore, FTZ invariance | GoogleTest, typed over both estimator back-ends | `tests/cpp` | all C++ jobs | 3 (built) |
+| Zero allocation after construction | separate binary with counting `operator new` | `tests/cpp/alloc` | all C++ jobs | 3 (built) |
+| Concurrency (seqlock, split engine) | GoogleTest under ThreadSanitizer | `tests/cpp` | tsan job | 3 (built) |
 | Math-spec identities | Python research script | `research/` | math-validation | 1 (built) |
 
-### 9.2 Benchmark methodology (Phase 3)
+### 9.2 Benchmark methodology (built: `bench/latency_report.cpp`)
 
-* **Service time per event.** Replay real and synthetic streams through the engine. Each event is timed with the cycle counter (`rdtsc` on x86, `cntvct_el0` on AArch64), calibrated to nanoseconds, into a fixed log-linear histogram, which allocates nothing. Report p50, p95, p99, p99.9 and the maximum, plus throughput in millions of events per second.
-* **Open-loop latency.** Replay at fixed arrival rates (for example $10^5$ and $10^6$ events/s) and measure from scheduled arrival to signal. A closed-loop replay measures service time only and hides queueing delay (coordinated omission).
+* **Service time per event.** Each event is timed with the platform counter (`cntvct_el0` behind an `isb` on AArch64, which runs at 1 GHz on the M4; `rdtscp` on x86) into a fixed log-linear histogram with 32 sub-buckets per octave, which allocates nothing. The mean back-to-back timer cost is subtracted. The report gives p50, p95, p99, p99.9 and the maximum, plus closed-loop throughput measured without timers in the loop.
+* **Component breakdown.** A stage-by-stage replica of `Model::step` is timed in situ, and its final state is checked field by field against the real engine, so the breakdown measures the code that runs.
+* **Open-loop latency.** Poisson arrivals at $10^5$ and $10^6$ events/s. The replay busy-waits for each arrival and measures from scheduled arrival to signal, so queueing delay is included (no coordinated omission).
 * **Environment.** Report CPU, compiler, flags (contraction on and off), and pinning. Run on isolated cores on Linux; mark macOS numbers indicative.
 
-### 9.3 Baseline measurements (Phase 2, real runs)
+### 9.3 Baseline measurements (Phase 2, real runs; Phase 3 results are in [benchmarks.md](benchmarks.md))
 
 These numbers are from `build/bench/bench/pulselob_bench` on an Apple M4 with AppleClang 21, Release with `-mcpu=native`, as the median of 5 repetitions. They are inputs to the Phase 3 cost model, not engine results.
 
@@ -583,16 +588,17 @@ The planned Phase 3/4 API is `pulselob.Engine(config, shape="default").run(event
 
 ---
 
-## 12. Decisions for the Phase 2 review
+## 12. Decisions
 
-1. **Header-only templated core with no C++20 named modules**, enforced by the layering and header checks (Section 2.3).
-2. **Inline single-threaded engine as the default**, with split mode as a Phase 3 measured option (Section 6.1).
-3. **Fixed-point e8 for prices and quantities** rather than double or per-instrument ticks (Section 7.1).
-4. **`ts_local_ns` as the engine clock** (Section 7.4).
-5. **The spot top-of-book data source** before Phase 4: (a) live recorder, (b) vendor data, or (c) the 2023–2024 perp window. Recommended: (a) plus (c) (Section 7.4).
-6. **License**, still unset.
+Phase 2 review (settled): header-only core without named modules; inline engine by default; fixed-point e8; `ts_local_ns` as the engine clock; the Phase 4 data source is a live recorder plus the 2023–2024 archive window, option (a) plus (c) of Section 7.4.
 
----
+For the Phase 3 review:
+
+1. **The information-form estimator as the default back-end**, with Potter kept as an alternative (math_spec 5.4.1, [benchmarks.md](benchmarks.md) Section 6). This changes the spec 0.1.0 choice, on measured speed and accuracy.
+2. **Inline mode stays the default; split mode is for live quoting** below about 1 µs of tick-to-quote budget or above about 5 × 10^5 events/s.
+3. **The long-gap rule and the other spec 0.2.0 changes** (math_spec Appendix C).
+4. **The CUSUM threshold.** The inherited $b_{\mathrm{cs}}=14$ gives 32 false alarms per hour at $D=4$ on stationary data. It should be recalibrated in Phase 5 (benchmarks.md Section 7).
+5. **License**, still unset.
 
 ## References
 

@@ -4,9 +4,9 @@ This document specifies the mathematics behind PulseLOB: real-time cross-venue o
 
 | Field | Value |
 |---|---|
-| Spec version | 0.1.0 |
-| Phase | 1 (mathematical research and formulation) |
-| Status | Draft for review. No engine code exists yet |
+| Spec version | 0.2.0 (changes in [Appendix C](#appendix-c-changes-in-spec-version-020)) |
+| Phase | 1 (mathematical research and formulation); revised in Phase 3 |
+| Status | Implemented in Phase 3 (`include/pulselob/`); verification results in Section 10 |
 | Date | 2026-11-20 |
 | Numerical evidence | `research/phase1/validate_math_spec.py` (all claims marked **[Qn]** or **[Fn]** are reproduced by that script) |
 
@@ -219,7 +219,7 @@ The recursion matches the $O(N^2)$ definition to 5.6e-16 for orders 1, 2 and 3 o
 
 Measured accuracy is 5.2e-16 relative for $n\le3$ on $x\in[10^{-12},200]$ **[Q3]**. A narrower series radius of $1/4$ was tried first and failed (3.1e-13 at $n=3$, $x=0.2501$), which is why the radius is 1.
 
-The only negative arguments that ever occur are $x=-\kappa\Delta$ with $n=0$ (Section 5.4); this follows from (I2).
+The only negative argument in the formulas is $x=-\kappa\Delta$ with $n=0$ (Section 5.4); every other argument is positive by (I2). The engine evaluates that one entry in the equivalent form $d\,\Delta\,\psi_0(-\kappa\Delta)=\Delta\,\psi_0(\kappa\Delta)$, which never forms $e^{+\kappa\Delta}$ and therefore cannot overflow on idle gaps (spec 0.2.0).
 
 **No new exponentials.** Every $e^{-x}$ needed below is a product or ratio of the $Q+1$ factors $e_q$ and $d=e^{-\kappa\Delta}$ already computed for the event.
 
@@ -401,11 +401,13 @@ The last update of $\tilde{\boldsymbol\Theta}$ combines Lemma 8 with the change 
 
 **Proposition 9 (no wind-up).** Let $W_P(t)$ be the time spanned by the last $P$ replenishments. Then $\mathbf M_t\succeq\min_p\omega_p\,e^{-\kappa_{\max}W_P(t)}\,\mathbf I$. A heartbeat replenishment every $T_{\mathrm{hb}}$ seconds without events guarantees $W_P\le P\,T_{\mathrm{hb}}$. Hence $\lVert\mathbf M^{-1}\rVert_2$ and $\lVert\mathbf U\rVert_2$ are bounded uniformly in time.
 
+**Long-gap rule (spec 0.2.0).** An interval longer than $T_{\mathrm{hb}}$, which can only happen when heartbeats are missing, ends with a *full* restore: every coordinate is replenished at its end time. This makes the bound of Proposition 9 unconditional, $W_P\le P\,T_{\mathrm{hb}}$ for every input stream, because any $P$ consecutive replenishments either all follow intervals no longer than $T_{\mathrm{hb}}$ or include a full restore. The rule is deterministic and decided at the end of the interval, so the batch definition below and Theorem 10 hold with it. It also has a numerical purpose. After a gap of hours without heartbeats the forgetting factor is $d=e^{-\kappa\Delta}\approx e^{-115}$ for $\Delta=10^4$ s, and the square-root update would have to inflate $\mathbf U$ by $d^{-1/2}$ and then apply rank-one updates with $\sigma^2\sim d^{-1}$, losing about 25 digits to cancellation in Lemma 8. The square-root back-end therefore rebuilds $\mathbf U$ from the stored $\mathbf M$ by Cholesky factorization after a full restore (Section 5.4.1).
+
 *Proof.* The data part of $\mathbf M$ is positive semi-definite. Coordinate $p$'s ridge was last restored at most $W_P$ seconds ago and has since decayed by at most $e^{-\kappa_{\max}W_P}$. $\square$
 
 **Scale-free prior strength.** Set $\omega_p=T_\omega\cdot\widehat{\mathbb E}[z_p^2]$, so that the prior weighs as much as $T_\omega$ seconds of typical data (default $T_\omega=1$ s). For a channel that never fires, its column of $\tilde{\boldsymbol\Theta}$ stays at the prior $\boldsymbol\Theta_0$, which is the correct fallback with no wind-up.
 
-**Definition (batch reference).** With $\tau_p(t)$ the time of the last replenishment of coordinate $p$ (0 initially):
+**Definition (batch reference).** With $\tau_p(t)$ the time of the last replenishment of coordinate $p$, including full restores (0 initially, that is, the time of the first event):
 
 ```math
 \mathbf M^{\mathrm{batch}}_t=\int_0^t e^{-\mathcal K(s,t)}\mathbf z(s)\mathbf z(s)^\top ds+\operatorname{diag}\bigl(\omega_p e^{-\mathcal K(\tau_p(t),t)}\bigr),\qquad
@@ -419,6 +421,15 @@ The last update of $\tilde{\boldsymbol\Theta}$ combines Lemma 8 with the change 
 **Measured.** The online and batch estimates agree to 6.8e-14 relative, at 14 checkpoints over 260 events, with two tie batches, an Erlang-2 basis, random marks and a mid-stream switch of $\kappa$. The batch side rebuilds $\mathbf z(s)$ by direct $O(N)$ sums and integrates by adaptive quadrature **[Q5]**.
 
 **Drift control without breaking the $O(1)$ bound.** $\mathbf C$ is stored. At event $k$, one row $r=k\bmod D$ is refreshed exactly as $\tilde\theta_r\leftarrow\mathbf C_{r,:}\mathbf U\mathbf U^\top$, at cost $O(P^2)$. This removes accumulated rounding from incremental updates of $\tilde{\boldsymbol\Theta}$ with a refresh period of $D$ events, at constant worst-case cost.
+
+### 5.4.1 Implementation forms (spec 0.2.0)
+
+Theorem 10 is a statement about $(\mathbf M,\mathbf C)$. Two back-ends maintain them and produce $\tilde{\boldsymbol\Theta}=\mathbf C\mathbf M^{-1}$; both are implemented and verified against the same batch reference.
+
+* **Square-root covariance form** (Lemma 8, the choice of spec 0.1.0). $\mathbf U$ and $\tilde{\boldsymbol\Theta}$ are updated incrementally by Potter updates, at $O((M+1)P^2)$ per event, with the row refresh above. $\mathbf M$ is also stored, for the long-gap refactorization.
+* **Information form** (added in 0.2.0). Only $(\mathbf M,\mathbf C,\boldsymbol\omega^{\mathrm{eff}})$ are stored. Each interval adds $\mathbf V^\top\mathbf F\mathbf V$ to $\mathbf M$ directly, using the sparsity of $\mathbf V$ (each coordinate has at most $r_{\max}$ coefficients), and each event solves $\tilde{\boldsymbol\Theta}^\top=\mathbf M^{-1}\mathbf C^\top$ by a fresh Cholesky factorization. The cost is $O(P^3/6+DP^2+(M+1)Pr_{\max})$ per event, which is fewer operations than the square-root form whenever $P/6+D<2.5(M+1)$, which holds for $D\le10$ with the default bank. No incremental state is carried in $\tilde{\boldsymbol\Theta}$, so there is nothing to drift, and the positive-definiteness of $\mathbf M$ is structural: it is a sum of Gram matrices and a positive ridge, scaled by positive factors.
+
+Theorem 11's bound becomes $O(\max(r_{\max}Q^3D^2,\,Q^3D^3))$ for the information form. It is still independent of $N$. The Phase 3 measurements (docs/benchmarks.md) favor the information form at $D=4$ in both speed (2.7 times faster per event) and accuracy (Section 10), and it is the engine's default.
 
 ### 5.5 Regime adaptation: time-rescaling CUSUM with variable forgetting
 
@@ -434,6 +445,7 @@ C^{\downarrow}_i\leftarrow\max\bigl(0,\,C^{\downarrow}_i-\ln\varrho-(\varrho^{-1
 When $\max_i\max(C^\uparrow_i,C^\downarrow_i)>b_{\mathrm{cs}}$, the next intervals use $\kappa_{\mathrm{fast}}$ for a dwell time $\tau_{\mathrm{dwell}}$, and all CUSUMs are reset (Page, 1954).
 
 * **Exactness is preserved.** $\kappa$ is decided at an event and applies to the next interval, so it is predictable. Theorem 10 covers any such path, and [Q5] includes a switch.
+* **Batch rule (spec 0.2.0).** Alarms are detected per event, but the reset and the start of the dwell take effect when the tie batch closes, at the first strictly later timestamp. Because $\kappa$ is only used for later intervals, this changes nothing for distinct timestamps, and it makes the detector invariant to the order of events inside a batch, as Proposition 4 requires.
 * **Graceful behavior.** During fast forgetting the data weight shrinks while the ridge is replenished, so estimates shrink toward the static calibration $\boldsymbol\Theta_0$ and are then pulled toward the new regime.
 * **Calibration.** The false-alarm rate falls roughly like $e^{-b_{\mathrm{cs}}}$. $b_{\mathrm{cs}}$ is set by simulating the target in-control average run length (Phase 3/5). The residuals use plug-in parameters, so they are only approximately Exp(1).
 
@@ -562,9 +574,9 @@ The served parameters $\hat{\boldsymbol\Theta}$ are obtained from $\tilde{\bolds
 
 **Proposition 14 (exact $O(DQ)$ row projection).** The projection is $\mathbf a^\star=(\tilde{\mathbf a}-\nu^\star\mathbf w)_+$. If $\mathbf w^\top(\tilde{\mathbf a})_+\le\rho_{\max}v_i$, then $\nu^\star=0$. Otherwise $\nu^\star>0$ is the unique root of the continuous, strictly decreasing, piecewise-linear function $\phi(\nu)=\mathbf w^\top(\tilde{\mathbf a}-\nu\mathbf w)_+-\rho_{\max}v_i$.
 
-The hot path computes it in $O(I_b\cdot DQ)$ with a deterministic cost:
+The hot path computes it with a deterministic, iteration-free cost of $O(n^2)$ for $n=DQ$ (spec 0.2.0; 0.1.0 used 64 bisection steps, $O(64n)$, which is more work for $n\le64$ and needs a tolerance):
 
-1. Run $I_b=64$ bisection steps on $[0,\max_m\tilde a_m/w_m]$. This identifies the active set $\mathcal A=\lbrace m:\tilde a_m>\nu^\star w_m\rbrace$.
+1. Evaluate $\phi$ at every breakpoint $\nu_m=\tilde a_m/w_m$ with $\tilde a_m>0$. Let $\nu_L$ be the largest breakpoint with $\phi(\nu_L)>0$, or 0. The active set is $\mathcal A=\lbrace m:\nu_m>\nu_L\rbrace$.
 2. Finalize exactly: $\nu^\star=\bigl(\sum_{\mathcal A}w_m\tilde a_m-\rho_{\max}v_i\bigr)/\sum_{\mathcal A}w_m^2$.
 3. Apply a final feasibility rescale if rounding leaves $\mathbf w^\top\mathbf a^\star>\rho_{\max}v_i$.
 
@@ -648,10 +660,10 @@ Hence the stationary forecast is
 
 ```math
 \bar m^{(0)}_i(H)=\hat\mu_iH+\sum_{j,q}\hat\alpha^q_{ij}\,\lambda^\infty_j\,\bar k_q(H),\qquad
-\bar k_q(H)=\sum_{l=0}^{r_q-1}\beta_q^{\,l}\,\frac{H^{\,r_q-l}}{(r_q-1-l)!}\,\psi_{r_q-1-l}(\beta_qH).
+\bar k_q(H)=\sum_{l=0}^{r_q-1}\beta_q^{\,r_q-1-l}\,\frac{H^{\,r_q-l}}{(r_q-1-l)!}\,\psi_{r_q-1-l}(\beta_qH).
 ```
 
-In particular $\bar k=H\psi_0(\beta H)$ for Erlang-1 and $\bar k=H\psi_0(\beta H)+\beta H^2\psi_1(\beta H)$ for Erlang-2. These follow by substituting the Campbell means into Theorem 3.
+In particular $\bar k=H\psi_0(\beta H)$ for Erlang-1 and $\bar k=H\psi_0(\beta H)+\beta H^2\psi_1(\beta H)$ for Erlang-2. These follow by substituting the Campbell means into Theorem 3. Equivalently $\bar k_q(H)=\int_0^H S_q(u)\,du$ with $S_q$ the kernel's survival function, which tends to the kernel mean $r_q/\beta_q$ as $H\to\infty$. (Spec 0.1.0 printed the power of $\beta_q$ in the general sum as $l$; the special cases were correct.)
 
 ### 7.3 The toxicity score
 
@@ -728,7 +740,8 @@ p^b=s+\hat\Delta-q\gamma\sigma^2T_h-\tfrac12\gamma\sigma^2T_h-\tfrac1\gamma\ln\!
 ```math
 \varepsilon^\pm=J^b_{V\pm}+\tau^\pm J^I_{V\pm},\qquad
 \hat\Delta=\sum_i s_i\,\bar J_i(t)\,X^\infty_i,\qquad
-\sigma^2=\sigma_W^2+\frac1H\sum_i m^{(0)}_i(t;H)\,\mathbb E[J_i^2].
+\sigma^2=\sigma_W^2+\frac1H\sum_i m^{(0)}_i(t;H)\,\mathbb E[J_i^2],\qquad
+\mathbb E[J_i^2]=(J^b_i)^2+\tau^{s_i}\bigl((J^b_i+J^I_i)^2-(J^b_i)^2\bigr)\ \text{under (A2)}.
 ```
 
 *Derivation.* Use the ansatz $u(t,x,s,q)=-\exp\bigl(-\gamma(x+qs+\vartheta_q(t))\bigr)$.
@@ -797,7 +810,7 @@ Reinstatement follows the hysteresis rule of Section 8.4.
 
 ## 9. Per-event algorithm (specification level, not code)
 
-Input: an event with integer timestamp $T_k$, channel $i=d_k$ and raw features. Steps marked † run only when $\Delta>0$. A heartbeat with no events runs steps 2–3 and 8 only.
+Input: an event with integer timestamp $T_k$, channel $i=d_k$ and raw features. Steps marked † run only when $\Delta>0$. A heartbeat with no events runs steps 2–3, the ridge replenishment of step 7, and step 8 (Proposition 9 needs the heartbeat replenishment; spec 0.1.0 omitted it from this list). Book updates and status events do not step the model; their signals are computed at their time from the post-event state decayed read-only.
 
 1. **Validate.** The timestamp, size and prices are finite, the size is positive and the channel is valid. Otherwise reject and count. Apply the out-of-order policy of Section 4.5.
 2. † **Flush** the pending buffer into $R^{q,(0)}$. This gives the state at $t_{\mathrm{prev}}+$.
@@ -811,7 +824,7 @@ Input: an event with integer timestamp $T_k$, channel $i=d_k$ and raw features. 
 4. **Regressor** $\mathbf z(t_k-)$ from $R$, excluding the pending buffer. **Mark** $g_k$ from the pre-update mark statistics, then update those statistics.
 5. **Residual and CUSUM** for channel $i$: $\xi=\Lambda_i-\Lambda_i^{\mathrm{last}}$. On an alarm, set $\kappa$ for subsequent intervals to $\kappa_{\mathrm{fast}}$ until $t_k+\tau_{\mathrm{dwell}}$.
 6. **Event increment:** $\mathbf C_{i,:}\mathrel{+}=\mathbf z^\top$ and $\tilde\theta_i\mathrel{+}=(\mathbf U\mathbf U^\top\mathbf z)^\top$.
-7. **Ridge replenishment** of coordinate $p=\text{counter}\bmod P$ (Section 5.4), then increment the counter. **Row refresh** of row $k\bmod D$.
+7. **Ridge replenishment** of coordinate $p=\text{counter}\bmod P$ (Section 5.4), then increment the counter. If the interval of step 3 was longer than $T_{\mathrm{hb}}$, all coordinates were restored at its end (long-gap rule). **Row refresh** of row $k\bmod D$ (square-root form) or the Cholesky solve (information form).
 8. **Serve:** clip $\hat\mu$; one Perron step for $\mathbf v$; project each excitation row; compute $\tilde\rho$; one Jacobi sweep for $\boldsymbol\lambda^\infty$.
 9. **Pending:** $\pi_i\mathrel{+}=g_k$.
 10. **Signals at $t_k+$**, using $R+\boldsymbol\pi$ read-only: $\mathbf m^{(0)}$, $\bar{\mathbf m}^{(0)}$, $\tau^\pm$, $\mathbf y^\infty$, $\mathbf X^\infty$ (Neumann, $K$ terms), $\hat\Delta$, $\sigma^2$, quotes, pull state machine and kill switch.
@@ -820,25 +833,23 @@ Input: an event with integer timestamp $T_k$, channel $i=d_k$ and raw features. 
 
 ## 10. Verification obligations for Phase 3
 
-Every recursion has a brute-force reference. Tolerances are relative and use double precision.
+Every recursion has a brute-force reference. Tolerances are relative and use double precision. The last column is the Phase 3 result: the worst error measured by the named test in `tests/cpp/` (release build, Apple M4; the same tests pass on GCC 13, Clang 18 with ASan, UBSan and TSan, and AppleClang in CI).
 
-| # | Quantity | Brute-force reference | Tolerance |
-|---|---|---|---|
-| V1 | $R^{q,(n)}_j(t_k-)$, Erlang orders 1–3, with ties | direct $O(N)$ sum per evaluation ($O(N^2)$ total) | 1e-10 |
-| V2 | compensator increments $\mathbf Z(\Delta)$, $\Delta\in[10^{-9},10^2]$ s | 50-digit quadrature | 1e-10 |
-| V3 | $\psi_n$, $n\le3$ | 50-digit quadrature | 1e-14 |
-| V4 | interval moment increment (Theorem 7) | adaptive quadrature of $\mathbf z\mathbf z^\top$ with $\mathbf z$ by direct sums | 1e-10 |
-| V5 | $\tilde{\boldsymbol\Theta}$ online against batch (Theorem 10), with ties, marks and a $\kappa$ switch | batch rebuild from the definitions | 1e-10 |
-| V6 | $\mathbf U\mathbf U^\top\mathbf M-\mathbf I$ over $10^7$ events | $\mathbf M$ accumulated directly | 1e-8 |
-| V7 | row projection | sorting algorithm plus KKT residual | 1e-12 |
-| V8 | Collatz–Wielandt bound $\ge\rho$ | dense eigenvalues | exact inequality |
-| V9 | $\mathbf m^{(0)}$, $\bar{\mathbf m}^{(0)}$, $\mathbf X^\infty$ | direct sums; large-$K$ Neumann series or a dense solve | 1e-10 |
-| V10 | non-stationary recovery $\mathbf A_1\to\mathbf A_2$ | known ground truth (statistical test) | as in Section 5.8 |
-| V11 | stress: bursts of $10^5$ same-timestamp events, $\Delta=10^{-9}$ and $10^6$ s, NaN/Inf/negative inputs, out-of-order streams | invariants: finiteness, positive definiteness, $\rho(\hat{\mathbf G})\le\rho_{\max}$, no state change on rejection | exact |
+| # | Quantity | Brute-force reference | Tolerance | Phase 3 result |
+|---|---|---|---|---|
+| V1 | $R^{q,(n)}_j(t_k-)$, Erlang orders 1–2, with ties | direct $O(N)$ sum per evaluation ($O(N^2)$ total) | 1e-10 | 1.4e-15 (`KernelState.RecursionMatchesDirectSumsWithTies`) |
+| V2 | compensator increments $\mathbf Z(\Delta)$, $\Delta\in[10^{-9},10^2]$ s | 30-point Gauss–Legendre on geometric pieces | 1e-10 | 1.3e-15 (`KernelState.CompensatorMatchesQuadrature`) |
+| V3 | $\psi_n$, $n\le3$ | 50-digit quadrature | 1e-14 | 1.7e-15 (`Psi.MatchesFiftyDigitQuadrature`) |
+| V4 | interval moment increment (Theorem 7) | quadrature of $\mathbf z\mathbf z^\top$ with $\mathbf z$ by direct sums | 1e-10 | passes for $\Delta$ from 1 ns to 60 s, both forms (`IntervalGram.MatchesQuadratureAndRankOneForm`) |
+| V5 | $\tilde{\boldsymbol\Theta}$ online against batch (Theorem 10), with ties, marks and $\kappa$ switches | batch rebuild from the definitions (Python, `research/phase3/crosscheck_reference.py`) | 1e-10 | 2.9e-14 information form; 8.3e-12 Potter (`CrossCheck.*`) |
+| V6 | $\mathbf U\mathbf U^\top\mathbf M-\mathbf I$ over $10^7$ events | $\mathbf M$ accumulated directly | 1e-8 | 6.3e-11 (`Estimator.PotterFactorStaysInverseOfMomentMatrix`) |
+| V7 | row projection | sorting algorithm plus KKT residual | 1e-12 | 5.6e-16 against sorting; KKT 1.2e-15 (`Projection.*`) |
+| V8 | Collatz–Wielandt bound $\ge\rho$ | lower Collatz–Wielandt bound at a power-iterated vector | exact inequality | holds on 3,000 random matrices (`CollatzWielandt.BoundsSpectralRadius`) |
+| V9 | $\mathbf m^{(0)}$, $\bar{\mathbf m}^{(0)}$, $\mathbf y^\infty$, $\mathbf X^\infty$ | direct sums of survival functions; dense solve | 1e-10 | 2.7e-16, 4.8e-16, 1.8e-14, 4.6e-16 (`Forecast.MatchesDirectSumsAndDenseSolve`) |
+| V10 | non-stationary recovery $\mathbf A_1\to\mathbf A_2$ | known ground truth (statistical test) | as in Section 5.8 | $D=4$, full bank: $\hat G$ 0.116 before (true 0.10), 0.515 after (true 0.50); lag to midpoint 17 s with the detector, 60 s without (`Regime.*`) |
+| V11 | stress: $10^4$ events in 1 ms, $10^5$ same-timestamp events, $\Delta=1$ ns, $10^4$ s and $10^6$ s gaps, extreme marks, NaN/Inf/invalid inputs, out-of-order streams | invariants: finiteness, positive definiteness, $\hat{\mathbf G}\mathbf v\le\rho_{\max}\mathbf v$, no state change on rejection | exact | all hold, both back-ends (`Stress/*`, `StressModel.*`) |
 
-The prototype checks Q1–Q8 already cover V1–V5, V7 and V8 at the stated tolerances, and V6 in a shortened form.
-
----
+The Python cross-check also compares every signal of a 496-event stream (intensities, toxicity, criticality, reservation shift, adverse-selection premia, variance) to 1.9e-12 for the information form. It matches every quote, flag and status exactly. The square-root form reaches 1.3e-9 on the cancellation-sensitive reservation shift, because its covariance-form rounding is amplified there (Section 5.4.1). That is one of the two reasons the information form is the default.
 
 ## 11. Assumptions and edge cases
 
@@ -945,3 +956,16 @@ These are starting values, not results.
 | Numerics | $X_{\mathrm{cut}}$; $\psi$ series radius and terms; pivot $\eta$; $I_b$; $K$; $\varepsilon_{\mathrm{ooo}}$ | 50; 1 and 22; $10^{-15}$; 64; 3; 100 µs |
 | Toxicity | $H$ | 50 ms |
 | Control | $\gamma$, $k$, $T_h$, $\delta_{\max}$, $J^b$, $J^I$, $\Delta_\tau$, $c_{\min}$, $c_{\mathrm{rq}}$ | calibrated in Phase 5; $\Delta_\tau=0.1$, $c_{\min}=250$ ms, $c_{\mathrm{rq}}=5$ ms as starting points |
+
+## Appendix C. Changes in spec version 0.2.0
+
+Phase 3 implemented the spec and verified it against definition-level references. These changes resulted; none alters a theorem's statement.
+
+1. **Long-gap rule (Section 5.4).** An interval longer than $T_{\mathrm{hb}}$ ends with a full ridge restore. Proposition 9's bound becomes unconditional, and the square-root form refactors $\mathbf U$ from $\mathbf M$ instead of applying Potter updates to a covariance inflated by $d^{-1}$. That would lose about 25 digits after a $10^4$ s gap.
+2. **Heartbeats (Section 9).** A heartbeat performs the ridge replenishment that Proposition 9 assumes. Version 0.1.0's step list omitted it.
+3. **Overflow-free Gram entry (Section 4.2).** $F_{00}$ is evaluated as $\Delta\,\psi_0(\kappa\Delta)$, so no positive exponent is ever formed.
+4. **Information-form back-end (Section 5.4.1).** This form is added and made the default after measurement. The square-root form remains implemented and verified.
+5. **Projection (Proposition 14).** An exact breakpoint search replaces the 64 bisection steps: no iteration count, no tolerance, and less work for $n=DQ\le64$.
+6. **CUSUM batch rule (Section 5.5).** Resets take effect when a tie batch closes, which makes the detector order-invariant within a batch.
+7. **Erratum (Section 7.2).** In the general formula for $\bar k_q(H)$ the power of $\beta_q$ is $r_q-1-l$, not $l$. The Erlang-1 and Erlang-2 special cases were already correct.
+8. **Variance term (Theorem 19).** $\mathbb E[J_i^2]$ is defined under (A2).

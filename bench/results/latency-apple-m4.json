@@ -1,0 +1,9 @@
+{
+  "version": "0.3.0",
+  "cpu": "Apple M4",
+  "counter_resolution_ns": 1.000,
+  "throughput_meps": {"cholesky": 1.871, "potter": 0.731, "split_hot": 8.454},
+  "cholesky_trades": {"count": 76801, "mean": 993.7, "p50": 992.0, "p95": 1088.0, "p99": 1120.0, "p999": 2112.0, "max": 10044.5},
+  "potter_trades": {"count": 76801, "mean": 2693.5, "p50": 2624.0, "p95": 3264.0, "p99": 3328.0, "p999": 7552.0, "max": 100162.5},
+  "split_trades": {"count": 76801, "mean": 157.9, "p50": 156.0, "p95": 196.0, "p99": 196.0, "p999": 368.0, "max": 10169.5}
+}
