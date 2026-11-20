@@ -1,5 +1,9 @@
 // Zero-allocation proof (docs/architecture.md Section 5.4). This binary replaces every global
 // operator new / delete with counting versions; the hot path must not allocate after construction.
+//
+// Exception: under ThreadSanitizer on Linux the sanitizer runtime links its own operator new /
+// delete statically, so they cannot be replaced. There the count comes from the sanitizer
+// allocator's malloc hook instead, which sees every allocation (operator new included).
 
 #include <gtest/gtest.h>
 
@@ -17,10 +21,40 @@
 #include "report.hpp"
 #include "test_config.hpp"
 
+#if defined(__linux__) && defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define PULSELOB_COUNT_VIA_SANITIZER_HOOK 1
+#endif
+#endif
+#if defined(__linux__) && defined(__SANITIZE_THREAD__)
+#define PULSELOB_COUNT_VIA_SANITIZER_HOOK 1
+#endif
+
+#if defined(PULSELOB_COUNT_VIA_SANITIZER_HOOK)
+#include <sanitizer/allocator_interface.h>
+#endif
+
 namespace {
 std::atomic<bool> g_armed{false};
 std::atomic<std::uint64_t> g_allocs{0};
 std::atomic<std::uint64_t> g_bytes{0};
+}  // namespace
+
+#if defined(PULSELOB_COUNT_VIA_SANITIZER_HOOK)
+extern "C" {
+static void count_malloc(const volatile void*, std::size_t n) {
+  if (g_armed.load(std::memory_order_relaxed)) {
+    g_allocs.fetch_add(1, std::memory_order_relaxed);
+    g_bytes.fetch_add(n, std::memory_order_relaxed);
+  }
+}
+static void count_free(const volatile void*) {}
+}
+namespace {
+const int g_hooks_installed = __sanitizer_install_malloc_and_free_hooks(count_malloc, count_free);
+}  // namespace
+#else
+namespace {
 
 void* counted_alloc(std::size_t n, std::size_t align) {
   if (g_armed.load(std::memory_order_relaxed)) {
@@ -91,6 +125,7 @@ void operator delete(void* p, std::size_t, std::align_val_t) noexcept {
 void operator delete[](void* p, std::size_t, std::align_val_t) noexcept {
   std::free(p);
 }
+#endif  // PULSELOB_COUNT_VIA_SANITIZER_HOOK
 
 namespace {
 
@@ -129,6 +164,9 @@ struct NullSink {
 };
 
 TEST(ZeroAllocation, CounterWorks) {
+#if defined(PULSELOB_COUNT_VIA_SANITIZER_HOOK)
+  ASSERT_NE(g_hooks_installed, 0) << "sanitizer malloc hooks not installed";
+#endif
   g_allocs = 0;
   g_armed = true;
   auto v = std::make_unique<std::vector<int>>(10);
