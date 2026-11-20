@@ -6,3 +6,4 @@ option(PULSELOB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(PULSELOB_NATIVE_ARCH "Tune for the build machine (-march/-mcpu=native); benchmarks only" OFF)
 set(PULSELOB_SANITIZERS "" CACHE STRING
     "Semicolon-separated sanitizers: address;undefined or thread (not both groups)")
+option(PULSELOB_BENCH_FP_CONTRACT "Benchmarks only: allow FMA contraction to measure the cost of -ffp-contract=off" OFF)

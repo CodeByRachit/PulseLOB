@@ -121,3 +121,19 @@ jobs:
           cache-dependency-path: research/requirements.txt
       - run: pip install -r research/requirements.txt
       - run: python research/phase1/validate_math_spec.py
+
+  reference-fixture:
+    name: Reference fixture reproducibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: research/requirements.txt
+      - run: pip install -r research/requirements.txt
+      # Regenerates tests/fixtures/phase3_crosscheck.txt from the definition-level reference and
+      # compares it with the committed file (the C++ cross-check test reads the committed file).
+      - run: python research/phase3/crosscheck_reference.py --check

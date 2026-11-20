@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-20
+
+Phase 3: the C++20 engine, its verification suite and real measurements.
+
+### Added
+
+- Model engine, header-only, zero allocation after construction, no exceptions or RTTI:
+  - `hawkes/kernel.hpp`: exact Erlang-1/2 state recursion with tie batches and the underflow cutoff, psi-form compensators, and the interval Gram matrix of Theorem 7.
+  - `hawkes/estimator.hpp`: the discounted least-squares estimator with two back-ends. The information form (stored moment matrix, fresh Cholesky solve per event) is the default; the square-root covariance form (Potter updates) is the spec 0.1.0 design. Both use ridge replenishment and the long-gap full restore.
+  - `hawkes/regime.hpp`: the time-rescaling CUSUM with variable forgetting.
+  - `hawkes/stability.hpp`: Perron-vector tracking, the exact Collatz–Wielandt row projection, the criticality index and the stationary intensity.
+  - `hawkes/forecast.hpp`: horizon forecasts, stationary references, the directional toxicity score and the excess-cascade vector.
+  - `hawkes/marks.hpp`, `feed/event_mapper.hpp`: marks and their online normalization; the mapping from trades and book updates to channel features.
+  - `control/quoting.hpp`: the Hawkes-adjusted Avellaneda–Stoikov quotes with the Glosten–Milgrom premium, derived pull thresholds, Schmitt triggers with cooldown, the kill switch, requote throttling and tick rounding.
+  - `engine/engine.hpp`: the deterministic inline engine and the replay driver. `engine/split_engine.hpp`: the estimator on a second thread, fed through the SPSC ring, with parameters published through `core/seqlock.hpp`.
+  - `core/psi.hpp`, `core/linalg.hpp`, `core/fp_env.hpp`: psi functions, deterministic fixed-order linear-algebra kernels, and the flush-to-zero guard.
+- Verification: about 60 new GoogleTest cases covering math_spec V1–V11. These include a definition-level Python reference of the whole pipeline (`research/phase3/crosscheck_reference.py`) whose fixture the C++ engine must match, a zero-allocation proof binary, a regime-shift recovery test, stress tests and determinism tests. All run under GCC 13, Clang 18 (ASan+UBSan, TSan) and AppleClang.
+- Benchmarks: a Google Benchmark suite and `pulselob_latency`, which reports tick-to-quote distributions, an in-situ component breakdown, the inline-versus-split experiment and open-loop latency. Results are in `docs/benchmarks.md`.
+- CI: a job that regenerates the reference fixture and compares it with the committed one.
+
+### Changed
+
+- `docs/math_spec.md` is now spec version 0.2.0 (see its Appendix C). It adds the long-gap rule, heartbeat replenishment, an overflow-free form of one Gram entry, the iteration-free projection, the CUSUM batch rule, E[J^2], and the information-form back-end. It also fixes the exponent in the general stationary-forecast formula.
+- `docs/architecture.md` is now document version 0.3.0: memory layout and interface as built, measured threading decision.
+
 ## [0.2.0] - 2026-11-20
 
 Phase 2: repository architecture, build system, memory layout and data schemas.
@@ -36,6 +61,7 @@ Phase 1: mathematical research and formulation.
 - `research/phase1/validate_math_spec.py`, numerical verification of the spec's claims plus the estimator-comparison experiments.
 - CI: markdown lint, offline link check, version consistency, and math validation. A tag-driven release workflow.
 
-[Unreleased]: https://github.com/CodeByRachit/PulseLOB/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/CodeByRachit/PulseLOB/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/CodeByRachit/PulseLOB/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/CodeByRachit/PulseLOB/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/CodeByRachit/PulseLOB/releases/tag/v0.1.0

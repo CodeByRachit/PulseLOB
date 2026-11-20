@@ -1,10 +1,10 @@
 # PulseLOB
 
-**Real-time cross-venue order-flow toxicity detection with an online, non-stationary, marked multivariate Hawkes process.** The planned engine is a C++20 core with zero allocations on the hot path and Python bindings. It will be validated inside an Avellaneda–Stoikov market-making simulator with realistic latency and queue modeling.
+**Real-time cross-venue order-flow toxicity detection with an online, non-stationary, marked multivariate Hawkes process.** The engine is a header-only C++20 core with zero allocations on the hot path, verified against definition-level references to 1e-10. It will get Python bindings next and then be validated inside an Avellaneda–Stoikov market-making simulator with realistic latency and queue modeling.
 
 [![CI](https://github.com/CodeByRachit/PulseLOB/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeByRachit/PulseLOB/actions/workflows/ci.yml)
 
-> **Status: Phase 2 (architecture, build system, memory layout, data schemas), awaiting review.** The build system, data schemas, memory-layout types, SPSC ring buffer and Python package skeleton exist and are tested. The model itself (Phase 3) does not exist yet. The project is built in reviewed phases, and each phase ships as a tagged version (see [Roadmap](#roadmap)).
+> **Status: Phase 3 (C++20 engine, verification, benchmarks), awaiting review.** The full per-event algorithm of the spec runs in C++20: exact kernel recursions, the online least-squares estimator with regime detection, the sub-criticality guardrail, toxicity scores and the quoting law. It runs inline or with the estimator on a second core. Phases 1 and 2 are released as `v0.1.0` and `v0.2.0`. Each phase ships as a tagged version (see [Roadmap](#roadmap)).
 
 ## The problem
 
@@ -38,6 +38,28 @@ CI runs the identity checks on every push and pull request.
 
 The engineering design (component boundaries, build, memory layout, concurrency and data schemas) is in **[docs/architecture.md](docs/architecture.md)**.
 
+## The engine (Phase 3)
+
+The engine implements the per-event algorithm of the spec in `include/pulselob/`, in the `core`, `feed`, `hawkes`, `control` and `engine` components. Each event costs constant time regardless of history length, and nothing allocates after construction. A dedicated test binary proves this by counting every `operator new` across 10^6 events, including in split mode with both threads running.
+
+**Verification.** Every recursion is tested against a brute-force reference at a relative tolerance of 1e-10, under GCC 13, Clang 18 (ASan+UBSan, TSan) and AppleClang. A separate Python implementation computes the whole pipeline from the definitions (`research/phase3/crosscheck_reference.py`): direct sums over the history, quadrature, and the batch least-squares solution. On a 496-event stream with ties, out-of-order data, long gaps and forgetting switches, the C++ engine matches it as follows:
+
+- the estimate, to 2.9e-14;
+- every signal, to 1.9e-12;
+- every quote, flag and status, exactly.
+
+The full table of math_spec V1–V11 results is in [Section 10 of the spec](docs/math_spec.md#10-verification-obligations-for-phase-3). On a simulated regime shift with $D=4$ and the full kernel bank, the cross-venue coupling estimate goes from 0.116 to 0.515 (true values 0.10 and 0.50). The change detector halves the time to cover half the step (17 s against 60 s).
+
+**Measured performance** (Apple M4, macOS, AppleClang 21; [docs/benchmarks.md](docs/benchmarks.md) has the method, every table and the run-to-run ranges):
+
+| Path | Tick-to-quote p50 | p99 | Throughput |
+|---|---|---|---|
+| inline engine, information-form estimator (default) | 0.99 µs | 1.1–1.3 µs | 1.8 M events/s |
+| inline engine, square-root (Potter) estimator | 2.6 µs | 3.3 µs | 0.73 M events/s |
+| split mode: estimator on a second core, hot thread | 0.16 µs | 0.2–0.4 µs | 8.4 M events/s |
+
+Tick-to-quote is the time from a trade arriving to a complete signal with quotes. macOS cannot isolate cores, so the tails are indicative. Inline mode is the default because it is bit-for-bit reproducible. Split mode is recommended for live quoting when the latency budget is below about 1 µs.
+
 ## Building
 
 You need CMake 3.25 or newer, a C++20 compiler (GCC 13+, Clang 16+ or AppleClang 15+), and Python 3.9 or newer for the package.
@@ -47,6 +69,9 @@ cmake --preset release            # also: debug, asan, tsan, bench
 cmake --build --preset release
 ctest --preset release
 
+cmake --preset bench && cmake --build --preset bench
+./build/bench/bench/pulselob_latency   # latency distributions, breakdown, threading experiment
+
 pip install ".[test]"             # builds the pybind11 module with scikit-build-core
 python -m pytest
 ```
@@ -55,27 +80,30 @@ python -m pytest
 
 | Phase | Deliverable | Version | Status |
 |---|---|---|---|
-| 1 | Mathematical specification and numerical validation | `v0.1.0` | in review |
-| 2 | Repository architecture, CMake, memory layout, data schemas | `v0.2.0` | in review |
-| 3 | C++20 engine, exactness and stress tests, micro-benchmarks | `v0.3.0` | planned |
+| 1 | Mathematical specification and numerical validation | `v0.1.0` | released |
+| 2 | Repository architecture, CMake, memory layout, data schemas | `v0.2.0` | released |
+| 3 | C++20 engine, exactness and stress tests, micro-benchmarks | `v0.3.0` | in review |
 | 4 | pybind11 bindings, synthetic generator, Binance data loader | `v0.4.0` | planned |
 | 5 | Event-driven market-making simulator and comparative backtest | `v0.5.0` | planned |
 | 6 | Figures, whitepaper, publication polish | `v1.0.0` | planned |
 
-Benchmark numbers will be published only from real runs of the Phase 3 and Phase 5 code.
+Every published number comes from a real run; the Phase 3 raw outputs are in [`bench/results/`](bench/results/).
 
 ## Repository layout
 
 ```text
-docs/math_spec.md                      Phase 1 specification (derivations, proofs, design decisions)
-docs/architecture.md                   Phase 2 engineering specification
-include/pulselob/                      header-only C++20 core (core/, feed/; model components in Phase 3)
+docs/math_spec.md                      specification (derivations, proofs, verification results)
+docs/architecture.md                   engineering specification (layout, memory, concurrency, schemas)
+docs/benchmarks.md                     Phase 3 measurements and the decisions they support
+include/pulselob/                      header-only C++20 engine: core/, feed/, hawkes/, control/, engine/
 bindings/                              pybind11 module pulselob._core
 python/pulselob/                       Python package (schema, .plev event files)
-tests/cpp/, tests/python/              GoogleTest and pytest suites
-bench/                                 Google Benchmark micro-benchmarks
+tests/cpp/, tests/python/              GoogleTest (incl. tests/cpp/alloc zero-allocation proof) and pytest
+tests/support/, tests/fixtures/        simulator and quadrature references; Python cross-check fixture
+bench/                                 Google Benchmark suite, latency report, raw results
 cmake/, CMakePresets.json              build options, warnings, sanitizers, pinned dependencies
 research/phase1/validate_math_spec.py  numerical verification of every claim in the spec
+research/phase3/                       definition-level reference implementation of the engine
 scripts/                               version and include-layering checks
 .github/workflows/                     CI, weekly research run, tag-driven releases
 ```
