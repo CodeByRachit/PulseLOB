@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-20
+
+Phase 4: Python bindings, synthetic data with ground truth, and Binance data infrastructure.
+
+### Added
+
+- Python engine (`pulselob.Engine`) over every model shape (`default`, `exp3`), estimator (`cholesky`, `potter`) and mode (`inline`, `split`).
+  - `run()` reads a NumPy array or a memory-mapped `.plev` file in place, releases the GIL, and fills pre-allocated output: one Signal per event and, optionally, sampled model states.
+  - `step()`, `heartbeat()`, `set_inventory()`, `state()` and `counters()` serve live loops.
+  - Batch throughput is 1.82 M events/s, the same as the native driver (1.77 M events/s).
+- `pulselob.EngineConfig`, every engine parameter under the key names of the new C++ codec `engine/config_io.hpp`. The bindings, the native tool and the cross-check test all use that codec.
+- `pulselob-replay`, a native replay tool shipped in the wheel. Its output equals `Engine.run` byte for byte, which the tests check.
+- `pulselob.synth` and `include/pulselob/synth/`: exact Ogata simulation with piecewise parameters and five scenarios (calm, two-sided noise, lead-lag bursts, regime shift, flash crash). Output is `.plev` plus ground truth (true intensities, segments, jump times). Statistical tests cover time rescaling, stationary counts and an independent intensity recursion.
+- `pulselob.data.recorder` (`pulselob-record`), a live recorder for Binance Spot and USD-M perpetual trades and top of book, with endpoints and payloads verified against the live streams.
+  - Arrival-time stamps are monotonic and anchored to UTC.
+  - Sweeps are merged.
+  - Gaps, duplicates, disconnects and silent streams produce status events.
+  - Output is a crash-safe streaming `.plev` file.
+  - Tests use mocks and a local WebSocket server, never Binance.
+- `pulselob.data.binance_archive` (`pulselob-archive`) and `feed/binance_csv.hpp`, which convert the data.binance.vision CSV archives.
+  - Parsing is exact, with no floating point, and the timestamp unit is detected per file.
+  - Downloads are cached and verified against SHA-256 checksums.
+  - Venues merge deterministically, and heartbeats are inserted on silences.
+  - The perp bookTicker window is enforced.
+  - The missing spot book is reported as unavailable, not fabricated.
+- `docs/data.md`: sources, verified formats, commands and known gaps.
+- `LICENSE` (MIT).
+
+### Changed
+
+- The default CUSUM threshold is now 30, an interim conservative value; math_spec is spec version 0.2.1.
+- The test simulator is now the public `synth` component.
+- `.plev` gains a streaming writer (`PlevWriter`), crash recovery (`recover_plev`), and support for empty files.
+
 ## [0.3.0] - 2026-11-20
 
 Phase 3: the C++20 engine, its verification suite and real measurements.
@@ -61,7 +95,8 @@ Phase 1: mathematical research and formulation.
 - `research/phase1/validate_math_spec.py`, numerical verification of the spec's claims plus the estimator-comparison experiments.
 - CI: markdown lint, offline link check, version consistency, and math validation. A tag-driven release workflow.
 
-[Unreleased]: https://github.com/CodeByRachit/PulseLOB/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/CodeByRachit/PulseLOB/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/CodeByRachit/PulseLOB/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/CodeByRachit/PulseLOB/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/CodeByRachit/PulseLOB/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/CodeByRachit/PulseLOB/releases/tag/v0.1.0

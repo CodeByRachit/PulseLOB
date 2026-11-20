@@ -1,0 +1,12 @@
+{
+  "version": "0.4.0",
+  "machine": "arm64 macOS-27.2.1-arm64-arm-64bit",
+  "events": 4993072,
+  "trades": 2496535,
+  "generation_seconds": 0.537,
+  "native_inline_events_per_s": 1770455,
+  "python_inline_events_per_s": 1818221,
+  "python_inline_vs_native": 1.027,
+  "python_split_events_per_s": 7861166,
+  "python_inline_with_states_events_per_s": 1815556
+}

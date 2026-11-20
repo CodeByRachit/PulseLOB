@@ -22,7 +22,8 @@ add_executable(pulselob_tests
   test_stress.cpp
   test_regime.cpp
   test_concurrency.cpp
-  test_crosscheck.cpp)
+  test_crosscheck.cpp
+  test_data.cpp)
 target_include_directories(pulselob_tests PRIVATE "${PULSELOB_TEST_SUPPORT_DIR}")
 target_compile_definitions(pulselob_tests PRIVATE PULSELOB_FIXTURE_DIR="${PULSELOB_FIXTURE_DIR}")
 target_link_libraries(pulselob_tests PRIVATE

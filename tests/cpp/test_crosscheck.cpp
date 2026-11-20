@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "pulselob/engine/config_io.hpp"
 #include "pulselob/engine/engine.hpp"
 #include "report.hpp"
 #include "test_config.hpp"
@@ -133,82 +134,23 @@ double num(const Fixture& f, const std::string& k, std::size_t i = 0) {
   return std::stod(f.cfg.at(k).at(i));
 }
 
+// The fixture's [config] section is the text form of engine/config_io.hpp (plus the run-time
+// inventory), so the shared parser builds the configuration.
 engine::EngineConfig<Shape> make_config(const Fixture& f) {
-  engine::EngineConfig<Shape> c{};
-  auto& m = c.model;
-  for (std::size_t q = 0; q < Shape::Q; ++q) {
-    m.beta[q] = num(f, "beta", q);
-  }
-  m.half_life_slow_s = num(f, "half_life_slow_s");
-  m.half_life_fast_s = num(f, "half_life_fast_s");
-  m.dwell_s = num(f, "dwell_s");
-  m.cusum_enabled = num(f, "cusum_enabled") != 0.0;
-  m.cusum_rho = num(f, "cusum_rho");
-  m.cusum_threshold = num(f, "cusum_threshold");
-  m.heartbeat_ns = static_cast<core::DurationNs>(num(f, "heartbeat_ns"));
-  m.rho_max = num(f, "rho_max");
-  m.chi = num(f, "chi");
-  m.eps_v = num(f, "eps_v");
-  m.rho_crit = num(f, "rho_crit");
-  m.mu_min = num(f, "mu_min");
-  m.mu_max = num(f, "mu_max");
-  m.v_ref_from_prior = num(f, "v_ref_from_prior") != 0.0;
-  m.x_cut = num(f, "x_cut");
-  m.pivot_eta = num(f, "pivot_eta");
-  m.warmup_events = num(f, "warmup_events");
-  for (std::size_t p = 0; p < kP; ++p) {
-    m.omega[p] = num(f, "omega", p);
-  }
-  for (std::size_t i = 0; i < kD; ++i) {
-    for (std::size_t p = 0; p < kP; ++p) {
-      m.theta0(i, p) = num(f, "theta0", i * kP + p);
+  std::string text;
+  for (const auto& [key, values] : f.cfg) {
+    text += key;
+    for (const auto& v : values) {
+      text += " " + v;
     }
+    text += "\n";
   }
-  c.marks.c_u = num(f, "c_u");
-  c.marks.c_L = num(f, "c_L");
-  c.marks.c_iota = num(f, "c_iota");
-  c.marks.u_max = num(f, "u_max");
-  c.marks.L_max = num(f, "L_max");
-  c.marks.eta_g = num(f, "eta_g");
-  c.marks.eta_nu = num(f, "eta_nu");
-  c.forecast.horizon_s = num(f, "horizon_s");
-  c.forecast.neumann_terms = static_cast<std::size_t>(num(f, "neumann_terms"));
-  for (std::size_t i = 0; i < kD; ++i) {
-    c.forecast.direction[i] = static_cast<int>(num(f, "direction", i));
-    c.forecast.impact[i] = num(f, "impact", i);
-    c.control.jump_benign[i] = num(f, "jump_benign", i);
-    c.control.jump_informed[i] = num(f, "jump_informed", i);
-  }
-  c.channels.direction = c.forecast.direction;
-  c.control.gamma = num(f, "gamma");
-  c.control.k = num(f, "k");
-  c.control.horizon_inv_s = num(f, "horizon_inv_s");
-  c.control.sigma_w2 = num(f, "sigma_w2");
-  c.control.delta_max = num(f, "delta_max");
-  c.control.q_max = num(f, "q_max");
-  c.control.buy_channel = static_cast<std::size_t>(num(f, "buy_channel"));
-  c.control.sell_channel = static_cast<std::size_t>(num(f, "sell_channel"));
-  c.control.hysteresis = num(f, "hysteresis");
-  c.control.cooldown_s = num(f, "cooldown_s");
-  c.control.requote_s = num(f, "requote_s");
-  c.control.latency_rt_s = num(f, "latency_rt_s");
-  const std::size_t ni = static_cast<std::size_t>(num(f, "instruments"));
-  for (std::size_t k = 0; k < ni; ++k) {
-    const auto id = static_cast<std::size_t>(num(f, "instruments", 1 + 3 * k));
-    c.channels.instruments[id] = {true, static_cast<std::uint8_t>(num(f, "instruments", 2 + 3 * k)),
-                                  static_cast<std::int64_t>(num(f, "instruments", 3 + 3 * k))};
-  }
-  const std::size_t nm = static_cast<std::size_t>(num(f, "channel_map"));
-  for (std::size_t k = 0; k < nm; ++k) {
-    const auto inst = static_cast<std::size_t>(num(f, "channel_map", 1 + 3 * k));
-    const auto side = static_cast<feed::Side>(static_cast<int>(num(f, "channel_map", 2 + 3 * k)));
-    c.channels.set_channel(inst, side, static_cast<int>(num(f, "channel_map", 3 + 3 * k)));
-  }
-  c.quote_instrument = static_cast<std::uint16_t>(num(f, "quote_instrument"));
-  c.ooo_tolerance_ns = static_cast<core::DurationNs>(num(f, "ooo_tolerance_ns"));
-  c.stale_ns = static_cast<core::DurationNs>(num(f, "stale_ns"));
-  c.reject_rate_eta = num(f, "reject_rate_eta");
-  c.reject_rate_max = num(f, "reject_rate_max");
+  engine::EngineConfig<Shape> c{};
+  const char* err = nullptr;
+  std::size_t line = 0;
+  const std::string_view ignore[] = {"inventory"};
+  EXPECT_TRUE(engine::parse_config_text(text, c, err, line, ignore))
+      << (err ? err : "") << " at line " << line;
   return c;
 }
 

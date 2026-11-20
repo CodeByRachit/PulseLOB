@@ -51,3 +51,31 @@ def test_rejects_corrupt_files(tmp_path):
 def test_write_requires_schema_dtype(tmp_path):
     with pytest.raises(TypeError):
         write_plev(tmp_path / "y.plev", np.zeros(3, dtype=np.int64))
+
+
+def test_streaming_writer_is_valid_after_each_flush_and_recoverable(tmp_path):
+    from pulselob import PlevWriter, open_plev, read_header, recover_plev, MARKET_EVENT_DTYPE
+
+    path = tmp_path / "stream.plev"
+    ev = np.zeros(10, dtype=MARKET_EVENT_DTYPE)
+    ev["ts_local_ns"] = np.arange(10)
+    w = PlevWriter(path, flush_records=4)
+    w.append(ev[:3])
+    w.flush()
+    assert read_header(path)["n_records"] == 3  # valid mid-stream
+    w.append(ev[3:])
+    w.close({"note": "test"})
+    arr, meta = open_plev(path)
+    assert np.array_equal(arr["ts_local_ns"], np.arange(10)) and meta["sidecar"]["note"] == "test"
+    with open(path, "ab") as f:  # a crash mid-record leaves a torn tail
+        f.write(b"\x01" * 20)
+    assert recover_plev(path) == 10
+    assert read_header(path)["n_records"] == 10
+
+
+def test_empty_file_opens(tmp_path):
+    from pulselob import MARKET_EVENT_DTYPE, open_plev, write_plev
+
+    path = write_plev(tmp_path / "empty.plev", np.empty(0, dtype=MARKET_EVENT_DTYPE))
+    arr, _ = open_plev(path)
+    assert arr.shape == (0,)
