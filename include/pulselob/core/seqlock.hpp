@@ -60,7 +60,8 @@ class Seqlock {
       std::atomic_thread_fence(std::memory_order_acquire);
       const std::uint64_t s2 = seq_.load(std::memory_order_relaxed);
       if (s1 == s2) {
-        std::memcpy(&out, dst.data(), sizeof(T));
+        // T is trivially copyable (asserted above); the cast tells GCC the raw copy is intended.
+        std::memcpy(static_cast<void*>(&out), dst.data(), sizeof(T));
         return s1;
       }
     }

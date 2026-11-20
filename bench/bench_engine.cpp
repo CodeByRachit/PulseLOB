@@ -46,7 +46,7 @@ void BM_EngineOnEvent(benchmark::State& state) {
       offset += span;
     }
   }
-  state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()));
+  state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK_TEMPLATE(BM_EngineOnEvent, hawkes::CholeskyEstimator<Shape>);
 BENCHMARK_TEMPLATE(BM_EngineOnEvent, hawkes::PotterEstimator<Shape>);
@@ -71,7 +71,7 @@ void BM_SplitEngineHotThread(benchmark::State& state) {
       state.ResumeTiming();
     }
   }
-  state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()));
+  state.SetItemsProcessed(state.iterations());
   eng->drain();
 }
 BENCHMARK(BM_SplitEngineHotThread);

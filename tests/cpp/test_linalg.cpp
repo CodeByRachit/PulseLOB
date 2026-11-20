@@ -55,11 +55,11 @@ TEST(Linalg, KernelsMatchNaiveLoopsAndKeepPaddingZero) {
   FixedVector<4> y{};
   pulselob::core::matvec(A, x, y);
   for (std::size_t r = 0; r < 4; ++r) {
-    long double s = 0.0L;
+    double s = 0.0;
     for (std::size_t c = 0; c < N; ++c) {
-      s += static_cast<long double>(A(r, c)) * x[c];
+      s += A(r, c) * x[c];
     }
-    EXPECT_NEAR(y[r], static_cast<double>(s), 1e-13);
+    EXPECT_NEAR(y[r], s, 1e-13);
   }
   FixedVector<4> u{};
   fill(u, rng);

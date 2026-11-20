@@ -13,7 +13,8 @@ template <class T>
 std::string sci(T v) {
   char buf[64];
   if constexpr (std::is_floating_point_v<T>) {
-    std::snprintf(buf, sizeof(buf), "%.3e", static_cast<double>(v));
+    const double d = v;
+    std::snprintf(buf, sizeof(buf), "%.3e", d);
   } else {
     std::snprintf(buf, sizeof(buf), "%llu", static_cast<unsigned long long>(v));
   }
