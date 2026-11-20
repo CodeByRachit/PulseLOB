@@ -1,0 +1,36 @@
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# C++ / CMake
+build/
+cmake-build-*/
+out/
+compile_commands.json
+*.o
+*.a
+*.so
+*.dylib
+
+# Node (lint tooling)
+node_modules/
+
+# Data dumps and local results
+data/raw/
+*.parquet
+*.csv.gz
+validation_full.txt
+
+# Local Claude Code settings
+.claude/settings.local.json
