@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Phase 4: Python bindings, synthetic data with ground truth, and Binance data infrastructure.
 
+### Highlights
+
+- **Python at native speed.** `pulselob.Engine.run` reads NumPy arrays and memory-mapped `.plev` files without copying and releases the GIL. It processes 1.82 M events/s, against 1.77 M/s for the native C++ driver, and the outputs are byte-identical.
+- **Synthetic data with ground truth.** Five scenarios: calm, two-sided noise, lead-lag bursts, regime shift and flash crash. The simulation is exact Ogata thinning in C++, at about 9 M events/s, and every dataset ships with its true intensities and regime parameters.
+- **Live Binance recorder.** Records Spot and USD-M perpetual trades and top of book. The USD-M trade stream now lives on the `/market` path, and a silence watchdog catches subscriptions that connect but never send data.
+- **Historical archive loader.** Parses data.binance.vision exactly, with no floating point, and verifies SHA-256 checksums. It never fabricates a spot order book.
+- **MIT license.**
+
 ### Added
 
 - Python engine (`pulselob.Engine`) over every model shape (`default`, `exp3`), estimator (`cholesky`, `potter`) and mode (`inline`, `split`).
@@ -44,6 +52,13 @@ Phase 4: Python bindings, synthetic data with ground truth, and Binance data inf
 
 Phase 3: the C++20 engine, its verification suite and real measurements.
 
+### Highlights
+
+- **Fast, allocation-free engine.** Tick-to-quote takes 0.99 µs at the median for the deterministic single-threaded engine, and 0.16 µs on the hot thread of two-core mode (Apple M4). No memory is allocated after start-up, and a counting `operator new` proves it.
+- **Verified against first principles.** An independent Python reference computes the whole pipeline from the definitions. On a 496-event stream the engine matches its estimate to 2.9e-14 and every quote, flag and status exactly.
+- **Information-form estimator by default.** It is 2.7 times faster and about 300 times more accurate than the square-root (Potter) form, which remains available.
+- **Numerical fix.** An idle gap of hours without heartbeats would have cost the square-root update about 25 digits. A full ridge restore with refactorization now handles it.
+
 ### Added
 
 - Model engine, header-only, zero allocation after construction, no exceptions or RTTI:
@@ -69,6 +84,13 @@ Phase 3: the C++20 engine, its verification suite and real measurements.
 
 Phase 2: repository architecture, build system, memory layout and data schemas.
 
+### Highlights
+
+- **One event record everywhere.** A 64-byte `MarketEvent` serves as ring slot, NumPy record and memory-mapped `.plev` record, so data move from file to engine without copying.
+- **Strict build.** A CMake build with presets, dependencies pinned by SHA-256, `-ffp-contract=off` and no fast-math. Every public header compiles standalone with `-fno-exceptions -fno-rtti`.
+- **Lock-free SPSC ring.** A push and pop take 7.8 ns, and the ring is checked under ThreadSanitizer.
+- **Data finding.** Binance publishes no spot top-of-book archive. This shaped the Phase 4 plan.
+
 ### Added
 
 - `docs/architecture.md`: component boundaries and layering, build system, configuration and floating-point policy, memory layout with per-field byte budgets, threading model (inline or split estimator, SPSC rings, seqlock), data schemas verified against Binance archive samples, `.plev` file format, testing and benchmark methodology.
@@ -82,6 +104,13 @@ Phase 2: repository architecture, build system, memory layout and data schemas.
 ## [0.1.0] - 2026-11-20
 
 Phase 1: mathematical research and formulation.
+
+### Highlights
+
+- **The model.** A marked multivariate Hawkes process with an Erlang kernel bank, whose intensity is linear in its parameters. Every state update is an exact constant-time recursion.
+- **An online estimate that equals the batch estimate.** A discounted least-squares estimator gives exactly the batch answer, verified to 6.8e-14. In a controlled experiment it was unbiased, with a lag of about one half-life. Online EM was biased by +0.02 to +0.07 and lagged 2.4 to 3.6 half-lives.
+- **Guaranteed stability.** A Collatz–Wielandt certificate with an exact projection keeps the served model sub-critical at every event.
+- **Toxicity and quoting.** A directional toxicity score, and Avellaneda–Stoikov quotes with a derived pull threshold and bounded message rate.
 
 ### Added
 
