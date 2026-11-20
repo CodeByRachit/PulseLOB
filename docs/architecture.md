@@ -157,9 +157,9 @@ Third-party code is included with `SYSTEM`, so the project's warning set and `-W
 | C++ gcc-13 release | Ubuntu 24.04 x86-64 | GCC 13 | Release, `-Werror` |
 | C++ clang-18 asan+ubsan | Ubuntu 24.04 x86-64 | Clang 18 | Debug, AddressSanitizer + UBSan |
 | C++ clang-18 tsan | Ubuntu 24.04 x86-64 | Clang 18 | RelWithDebInfo, ThreadSanitizer |
-| C++ appleclang arm64 release | macOS 14 arm64 | AppleClang | Release, `-Werror` |
+| C++ appleclang arm64 release | macOS, latest GitHub arm64 image | AppleClang | Release, `-Werror` |
 | Benchmarks compile | Ubuntu 24.04 | GCC 13 | bench preset (built, not run: CI timings are not meaningful) |
-| Python | Ubuntu (3.9, 3.12), macOS (3.12) | platform default | `pip install .[test]`, pytest |
+| Python | Ubuntu (3.9, 3.12), macOS latest arm64 (3.12) | platform default | `pip install .[test]`, pytest |
 
 The CMake minimum is 3.25 (presets v6, `FetchContent ... SYSTEM`). Development was done with CMake 4.3 and AppleClang 21 on an Apple M4.
 
