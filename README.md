@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/CodeByRachit/PulseLOB/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeByRachit/PulseLOB/actions/workflows/ci.yml)
 
-> **Status: Phase 1 (mathematical specification), awaiting review.** There is no engine code yet. The project is built in reviewed phases, and each phase ships as a tagged version (see [Roadmap](#roadmap)).
+> **Status: Phase 2 (architecture, build system, memory layout, data schemas), awaiting review.** The build system, data schemas, memory-layout types, SPSC ring buffer and Python package skeleton exist and are tested. The model itself (Phase 3) does not exist yet. The project is built in reviewed phases, and each phase ships as a tagged version (see [Roadmap](#roadmap)).
 
 ## The problem
 
@@ -36,12 +36,27 @@ python research/phase1/validate_math_spec.py --full   # plus the estimator-compa
 
 CI runs the identity checks on every push and pull request.
 
+The engineering design (component boundaries, build, memory layout, concurrency and data schemas) is in **[docs/architecture.md](docs/architecture.md)**.
+
+## Building
+
+You need CMake 3.25 or newer, a C++20 compiler (GCC 13+, Clang 16+ or AppleClang 15+), and Python 3.9 or newer for the package.
+
+```bash
+cmake --preset release            # also: debug, asan, tsan, bench
+cmake --build --preset release
+ctest --preset release
+
+pip install ".[test]"             # builds the pybind11 module with scikit-build-core
+python -m pytest
+```
+
 ## Roadmap
 
 | Phase | Deliverable | Version | Status |
 |---|---|---|---|
 | 1 | Mathematical specification and numerical validation | `v0.1.0` | in review |
-| 2 | Repository architecture, CMake, memory layout, data schemas | `v0.2.0` | planned |
+| 2 | Repository architecture, CMake, memory layout, data schemas | `v0.2.0` | in review |
 | 3 | C++20 engine, exactness and stress tests, micro-benchmarks | `v0.3.0` | planned |
 | 4 | pybind11 bindings, synthetic generator, Binance data loader | `v0.4.0` | planned |
 | 5 | Event-driven market-making simulator and comparative backtest | `v0.5.0` | planned |
@@ -53,10 +68,16 @@ Benchmark numbers will be published only from real runs of the Phase 3 and Phase
 
 ```text
 docs/math_spec.md                      Phase 1 specification (derivations, proofs, design decisions)
+docs/architecture.md                   Phase 2 engineering specification
+include/pulselob/                      header-only C++20 core (core/, feed/; model components in Phase 3)
+bindings/                              pybind11 module pulselob._core
+python/pulselob/                       Python package (schema, .plev event files)
+tests/cpp/, tests/python/              GoogleTest and pytest suites
+bench/                                 Google Benchmark micro-benchmarks
+cmake/, CMakePresets.json              build options, warnings, sanitizers, pinned dependencies
 research/phase1/validate_math_spec.py  numerical verification of every claim in the spec
-research/requirements.txt              pinned Python dependencies for research scripts
-scripts/check_version.sh               VERSION / CHANGELOG / tag consistency check
-.github/workflows/                     CI (lint, links, version, math validation) and releases
+scripts/                               version and include-layering checks
+.github/workflows/                     CI, weekly research run, tag-driven releases
 ```
 
 ## Versioning
