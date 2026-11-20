@@ -1,0 +1,10 @@
+{
+  "config": {
+    // Long lines are normal for prose and display math.
+    "MD013": false,
+    // Repeated sub-headings (e.g. "Proof") are allowed under different parents.
+    "MD024": { "siblings_only": true }
+  },
+  "globs": ["**/*.md"],
+  "ignores": ["node_modules/**", "build/**", ".venv/**"]
+}
